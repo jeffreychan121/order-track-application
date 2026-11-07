@@ -1,0 +1,369 @@
+{
+  "schema_version": 1,
+  "source": {
+    "name": "Assessment SQL-like SKU query page",
+    "url": "https://script.google.com/macros/s/AKfycbz7CmUgos3WY8Vmn6IuL40mJlsGhCvJZWxubWq0LZu3d3TdHIytPs1C5XNcJPZgle7J/exec",
+    "table": "product_list",
+    "query": "SELECT * FROM product_list WHERE SKU IN ('TBAMET10', 'TBAMET28', 'TBOPAL28', 'AURPUR10', 'HARNIG', 'LELCBD100', 'HALGEO15', 'MCMW10', 'MCBO30')",
+    "result_file": "source/sku-query-result.json",
+    "returned_row_count": 9,
+    "status": "matched_all_order_skus",
+    "raw_result_file": "source/sku-query-result.json"
+  },
+  "price_currency": "AUD",
+  "rrp_includes_gst": true,
+  "gst_rate": "0.10",
+  "products": [
+    {
+      "sku": "AURPUR10",
+      "name": "Purple Raine THC18% 15g",
+      "description": ".",
+      "rrp_incl_gst": "99.00",
+      "currency": "AUD",
+      "size": "15",
+      "weight": {
+        "value": "68.0",
+        "unit": "g"
+      },
+      "dimensions": {
+        "length": {
+          "value": "76.0",
+          "unit": "mm"
+        },
+        "width": {
+          "value": "76.0",
+          "unit": "mm"
+        },
+        "height": {
+          "value": "78.0",
+          "unit": "mm"
+        }
+      },
+      "volume": {
+        "value": "450528.0",
+        "unit": "mm³"
+      },
+      "volumetric_gross_weight": {
+        "value": "0.02",
+        "unit": "kg"
+      },
+      "barcode": "9309000332199",
+      "dosage_type": "Herb,dried",
+      "product_type": "Finished products",
+      "schedule": "8",
+      "status": "List"
+    },
+    {
+      "sku": "HALGEO15",
+      "name": "The Geoffrey CBG 12% 15g",
+      "description": "The Geoffrey is a CBG (cannabigerol) dominant medicinal cannabis flower, with 12% CBG, <0",
+      "rrp_incl_gst": "110.00",
+      "currency": "AUD",
+      "size": "15",
+      "weight": {
+        "value": "68.0",
+        "unit": "g"
+      },
+      "dimensions": {
+        "length": {
+          "value": "76.0",
+          "unit": "mm"
+        },
+        "width": {
+          "value": "76.0",
+          "unit": "mm"
+        },
+        "height": {
+          "value": "78.0",
+          "unit": "mm"
+        }
+      },
+      "volume": {
+        "value": "450528.0",
+        "unit": "mm³"
+      },
+      "volumetric_gross_weight": {
+        "value": "0.02",
+        "unit": "kg"
+      },
+      "barcode": "9361800000005",
+      "dosage_type": "Herb,dried",
+      "product_type": "Finished products",
+      "schedule": "8",
+      "status": "List"
+    },
+    {
+      "sku": "HARNIG",
+      "name": "Harbour LR Night Cartridge",
+      "description": ".",
+      "rrp_incl_gst": "149.00",
+      "currency": "AUD",
+      "size": "2",
+      "weight": {
+        "value": "25.0",
+        "unit": "g"
+      },
+      "dimensions": {
+        "length": {
+          "value": "30.0",
+          "unit": "mm"
+        },
+        "width": {
+          "value": "60.0",
+          "unit": "mm"
+        },
+        "height": {
+          "value": "120.0",
+          "unit": "mm"
+        }
+      },
+      "volume": {
+        "value": "216000.0",
+        "unit": "mm³"
+      },
+      "volumetric_gross_weight": {
+        "value": "0.02",
+        "unit": "kg"
+      },
+      "barcode": "9309000332069",
+      "dosage_type": "Inhalation",
+      "product_type": "Finished products",
+      "schedule": "8",
+      "status": "List"
+    },
+    {
+      "sku": "LELCBD100",
+      "name": "CBD 100 - Full Spectrum Certified Organic",
+      "description": ".",
+      "rrp_incl_gst": "140.00",
+      "currency": "AUD",
+      "size": "30",
+      "weight": {
+        "value": "89.0",
+        "unit": "g"
+      },
+      "dimensions": {
+        "length": {
+          "value": "45.0",
+          "unit": "mm"
+        },
+        "width": {
+          "value": "34.0",
+          "unit": "mm"
+        },
+        "height": {
+          "value": "104.0",
+          "unit": "mm"
+        }
+      },
+      "volume": {
+        "value": "159120.0",
+        "unit": "mm³"
+      },
+      "volumetric_gross_weight": {
+        "value": "0.02",
+        "unit": "kg"
+      },
+      "barcode": "9369998527700",
+      "dosage_type": "Oral  liquid",
+      "product_type": "Finished products",
+      "schedule": "8",
+      "status": "List"
+    },
+    {
+      "sku": "MCBO30",
+      "name": "BOB 30 (Alien OG) THC 30% 10g",
+      "description": "This batch of BOB 30 is the cultivar Alien OG and is a 30% THC indica dominant flower, suitable for afternoon or evening use. Alien OG is a cross between Tahoe OG and Alien Kush. The dominant terpenes are Myrcene, Beta -Caryophyllene and Limonene. This cultivar has been reported by patients to produce a cerebral and sedating effect, popular for relieving symptoms associated with chronic pain and insomnia. This strain offers a rich terpene profile, delivering a lemon, pine and gas aroma.",
+      "rrp_incl_gst": "99.00",
+      "currency": "AUD",
+      "size": "10",
+      "weight": {
+        "value": "59.0",
+        "unit": "g"
+      },
+      "dimensions": {
+        "length": {
+          "value": "76.0",
+          "unit": "mm"
+        },
+        "width": {
+          "value": "76.0",
+          "unit": "mm"
+        },
+        "height": {
+          "value": "79.0",
+          "unit": "mm"
+        }
+      },
+      "volume": {
+        "value": "456304.0",
+        "unit": "mm³"
+      },
+      "volumetric_gross_weight": {
+        "value": "0.1",
+        "unit": "kg"
+      },
+      "barcode": "724022037843",
+      "dosage_type": "Herb,dried",
+      "product_type": "Finished products",
+      "schedule": "8",
+      "status": "List"
+    },
+    {
+      "sku": "MCMW10",
+      "name": "Maali Wind THC 25% 10g",
+      "description": "Maali Wind is the cultivar Strawberry Gas Cake and is a 25% THC indica dominant flower. Strawberry Gas Cake is a cross between Pink Panties and Sunset Sherbert. This flower is grown in organic living soil under the Australian sun using regenerative agriculture techniques, resulting in a flower which is rich in terpenes at 3%. The dominant terpenes are Myrcene, Pinene, Limonene, Caryophyllene and Linalool, which provide a sweet mango flavour with subtle zest and spicy, floral undertones. Maali Wind flowers are trichrome dense and are light green in colour with bright orange pistils. Maali Wind is most suitable for afternoon or evening use.",
+      "rrp_incl_gst": "129.00",
+      "currency": "AUD",
+      "size": "10",
+      "weight": {
+        "value": "59.0",
+        "unit": "g"
+      },
+      "dimensions": {
+        "length": {
+          "value": "76.0",
+          "unit": "mm"
+        },
+        "width": {
+          "value": "76.0",
+          "unit": "mm"
+        },
+        "height": {
+          "value": "79.0",
+          "unit": "mm"
+        }
+      },
+      "volume": {
+        "value": "456304.0",
+        "unit": "mm³"
+      },
+      "volumetric_gross_weight": {
+        "value": "0.1",
+        "unit": "kg"
+      },
+      "barcode": "724022037898",
+      "dosage_type": "Herb,dried",
+      "product_type": "Finished products",
+      "schedule": "8",
+      "status": "List"
+    },
+    {
+      "sku": "TBAMET10",
+      "name": "Amethyst THC 25% 10G",
+      "description": "THC 25 Amethyst Flower is a cultivar that has Wedding Cake and Animal Cookies heritage. The flowers have a light purple colouring with a dense bud structure heavily coated in trichomes. It is a Indica dominant cultivar with a sweet, grape and fruity like aroma.",
+      "rrp_incl_gst": "99.00",
+      "currency": "AUD",
+      "size": "10",
+      "weight": {
+        "value": "56.0",
+        "unit": "g"
+      },
+      "dimensions": {
+        "length": {
+          "value": "67.0",
+          "unit": "mm"
+        },
+        "width": {
+          "value": "67.0",
+          "unit": "mm"
+        },
+        "height": {
+          "value": "104.0",
+          "unit": "mm"
+        }
+      },
+      "volume": {
+        "value": "466856.0",
+        "unit": "mm³"
+      },
+      "volumetric_gross_weight": {
+        "value": "0.1",
+        "unit": "kg"
+      },
+      "barcode": "754590266659",
+      "dosage_type": "Herb,dried",
+      "product_type": "Finished products",
+      "schedule": "8",
+      "status": "List"
+    },
+    {
+      "sku": "TBAMET28",
+      "name": "Amethyst THC 25% 28G",
+      "description": "Our THC 25 – Amethyst Flower now comes in 28g size. Amethyst is a cultivar that has Wedding Cake and Animal Cookies heritage. The flowers have a light purple colouring with a dense bud structure heavily coated in trichomes. It is a Indica dominant cultivar with a sweet, grape and fruity like aroma. This flower is grown and produced in our AU-GMP certified facility located in Tasmania.",
+      "rrp_incl_gst": "199.00",
+      "currency": "AUD",
+      "size": "28",
+      "weight": {
+        "value": "93.0",
+        "unit": "g"
+      },
+      "dimensions": {
+        "length": {
+          "value": "86.0",
+          "unit": "mm"
+        },
+        "width": {
+          "value": "86.0",
+          "unit": "mm"
+        },
+        "height": {
+          "value": "113.0",
+          "unit": "mm"
+        }
+      },
+      "volume": {
+        "value": "835748.0",
+        "unit": "mm³"
+      },
+      "volumetric_gross_weight": {
+        "value": "0.4",
+        "unit": "kg"
+      },
+      "barcode": "781005753602",
+      "dosage_type": "Herb,dried",
+      "product_type": "Finished products",
+      "schedule": "8",
+      "status": "List"
+    },
+    {
+      "sku": "TBOPAL28",
+      "name": "Opal THC 23% 28G",
+      "description": "Our THC 23 Opal product is now available in a 28g format. Opal has the classic White Widow genetic heritage. Being a sativa dominant hybrid it is abundant in terpinolene and has fresh, citrusy aroma. This flower is grown and produced in our facility located in Tasmania.",
+      "rrp_incl_gst": "199.00",
+      "currency": "AUD",
+      "size": "28",
+      "weight": {
+        "value": "93.0",
+        "unit": "g"
+      },
+      "dimensions": {
+        "length": {
+          "value": "86.0",
+          "unit": "mm"
+        },
+        "width": {
+          "value": "86.0",
+          "unit": "mm"
+        },
+        "height": {
+          "value": "113.0",
+          "unit": "mm"
+        }
+      },
+      "volume": {
+        "value": "835748.0",
+        "unit": "mm³"
+      },
+      "volumetric_gross_weight": {
+        "value": "0.4",
+        "unit": "kg"
+      },
+      "barcode": "781005753619",
+      "dosage_type": "Herb,dried",
+      "product_type": "Finished products",
+      "schedule": "8",
+      "status": "List"
+    }
+  ]
+}

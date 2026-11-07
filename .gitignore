@@ -1,0 +1,24 @@
+node_modules/
+dist/
+frontend/test-results/
+frontend/playwright-report/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.env
+.env.*
+!.env.example
+.DS_Store
+.omc/
+backend/logs/
+*.log
+data/*.db
+data/*.db-*
+data/created_orders.json
+
+# Assessment source material can contain live test credentials; keep it local.
+*.pdf
+SQL.url
+IT_Coding_Assessment_Update_v2.html
