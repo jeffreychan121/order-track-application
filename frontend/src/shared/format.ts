@@ -1,5 +1,7 @@
+/** 所有金额统一按澳元显示两位小数，缺失值按零展示。 */
 export const money = (value: unknown): string => `A$${Number(value ?? 0).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+/** 将十进制文本精确解析为指定小数位的整数，非法精度不做静默舍入。 */
 function decimalToScaledInteger(value: string, places: number): bigint | null {
   const normalized = value.trim();
   const match = normalized.match(/^(\d*)(?:\.(\d*))?$/);
@@ -9,6 +11,7 @@ function decimalToScaledInteger(value: string, places: number): bigint | null {
   return BigInt(whole) * 10n ** BigInt(places) + BigInt(fraction || '0');
 }
 
+/** 将非负金额比例按 HALF_UP 舍入到整数；非法分母时返回零。 */
 function roundPositiveRatioHalfUp(numerator: bigint, denominator: bigint): bigint {
   if (denominator <= 0n || numerator < 0n) return 0n;
   // 对正数按 HALF_UP 舍入到整数分，避免浮点误差影响税额边界。
@@ -48,22 +51,42 @@ export function calculateOrderLineAmounts(
   };
 }
 
+/** 按未税订单行汇总同税率金额，再在税率组级别计算 GST。 */
+export function calculateOrderGstCents(lines: Array<{ subtotalExGstCents: number; gstRatePercent: string }>): number {
+  const basesByRate = new Map<bigint, bigint>();
+  for (const line of lines) {
+    const rateBasisPoints = decimalToScaledInteger(line.gstRatePercent, 2);
+    if (rateBasisPoints === null || !Number.isSafeInteger(line.subtotalExGstCents) || line.subtotalExGstCents < 0) continue;
+    const rate = BigInt(rateBasisPoints);
+    basesByRate.set(rate, (basesByRate.get(rate) ?? 0n) + BigInt(line.subtotalExGstCents));
+  }
+
+  return Number([...basesByRate.entries()].reduce(
+    (total, [rateBasisPoints, netCents]) => total + roundPositiveRatioHalfUp(netCents * rateBasisPoints, 10_000n),
+    0n,
+  ));
+}
+
+/** 校验订单行税率是否在 0% 到 100% 之间且最多保留两位小数。 */
 export function isValidOrderLineGstRate(value: string): boolean {
   const rate = decimalToScaledInteger(value, 2);
   return rate !== null && rate <= 10_000n;
 }
 
+/** 校验含税标价为正数且最多精确到分。 */
 export function isValidMoneyAmount(value: string): boolean {
   const amount = decimalToScaledInteger(value, 2);
   return amount !== null && amount > 0n;
 }
 
+/** 按澳洲日期格式显示订单日期，固定时区以免受运行设备时区影响。 */
 export function formatDate(value: string | null | undefined): string {
   if (!value) return '—';
   const parsed = new Date(`${value.slice(0, 10)}T00:00:00`);
   return Number.isNaN(parsed.getTime()) ? value : new Intl.DateTimeFormat('en-AU', { dateStyle: 'medium', timeZone: 'Australia/Melbourne' }).format(parsed);
 }
 
+/** 将追踪时间格式化为澳洲本地时间；无效值原样返回供排查。 */
 export function formatDateTime(value: string | null | undefined): string {
   if (!value) return '—';
   const parsed = new Date(value);

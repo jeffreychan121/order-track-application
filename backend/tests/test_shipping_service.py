@@ -65,14 +65,14 @@ def test_quote_posts_explicit_origin_and_normalizes_returned_rate(monkeypatch):
     monkeypatch.setenv("AUSTRALIA_POST_ACCOUNT_NUMBER", "0000000000")
     monkeypatch.setattr(shipping_service.httpx, "Client", FakeClient)
     result = shipping_service.get_rates({
-        "origin": {"suburb": "Ryde", "state": "NSW", "postcode": "2111"},
+        "origin": {"suburb": "Ryde", "state": "NSW", "postcode": "2112"},
         "destination": {"suburb": "South Yarra", "state": "VIC", "postcode": "3141"},
         "packages": [{"weight": "1.2", "length": "20", "width": "15", "height": "10"}],
         "order_no": "PO-EXAMPLE", "shipment_id": 7,
     })
     assert FakeClient.last_request["url"].endswith("/prices/shipments")
     shipment = FakeClient.last_request["json"]["shipments"][0]
-    assert shipment["from"]["postcode"] == "2111"
+    assert shipment["from"]["postcode"] == "2112"
     assert shipment["to"]["postcode"] == "3141"
     assert shipment["items"] == [{"weight": "1.2", "length": "20", "width": "15", "height": "10"}]
     assert result[0]["product_id"] == "EL1"

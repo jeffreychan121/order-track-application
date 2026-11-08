@@ -9,6 +9,7 @@ interface OrderStatusBarProps {
   status: OrderStatus;
 }
 
+/** 按订单状态顺序标记已完成、当前和未到达的流程节点。 */
 export function OrderStatusBar({ status }: OrderStatusBarProps) {
   const current = STATUS_SEQUENCE.indexOf(status);
   return <div className="statusbar-wrap" aria-label={`Order status: ${STATUS_LABELS[status]}`}>

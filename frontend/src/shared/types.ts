@@ -1,5 +1,7 @@
 export type OrderStatus = 'draft' | 'confirmed' | 'in_transit' | 'completed';
 export type TrackingStatus = 'delivered' | 'partially_delivered' | 'in_transit' | 'pending' | 'unknown' | 'not_queried' | 'not_implemented' | 'unavailable';
+// 临时兼容尚未完成响应 schema 收紧的页面；新功能优先使用下方领域类型。
+export type AnyRecord = Record<string, any>;
 
 export interface OrderLine {
   id: number;
@@ -61,7 +63,7 @@ export interface ShippingQuote {
 }
 
 export interface ApiErrorPayload {
-  detail?: string | { code?: string; message?: string };
+  detail?: string | { code?: string; message?: string } | Array<{ loc?: Array<string | number>; msg?: string }>;
 }
 
 export interface Order {
@@ -72,6 +74,7 @@ export interface Order {
   company_name: string;
   customer: { name: string; phone: string; email: string };
   shipping_address: Record<string, string>;
+  address_line2?: string | null;
   line_items: OrderLine[];
   shipments: Shipment[];
   summary: { currency: 'AUD'; subtotal_ex_gst: string; gst_rate: string; gst_amount: string; shipment_fee: string; total: string };

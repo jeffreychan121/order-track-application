@@ -41,7 +41,7 @@ interface AccountPostageProductsProps {
   onOpenChange: (open: boolean) => void;
 }
 
-/** 合同产品按需在独立弹窗查看，避免目录内容撑长 Shipping Planner 和报价表单。 */
+/** 按需加载合同产品和揽收地点，避免目录内容撑长 Shipping Planner 表单。 */
 export function AccountPostageProducts({ profileId, onUseMerchantLocation, open, onOpenChange }: AccountPostageProductsProps) {
   const [data, setData] = useState<AccountProductsResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -52,8 +52,10 @@ export function AccountPostageProducts({ profileId, onUseMerchantLocation, open,
   useEffect(() => {
     if (!open || !profileId) return;
     const requestKey = `${profileId}:${refreshKey}`;
+    // 弹窗重复打开时复用已取数据；切换账号或点刷新才重新请求。
     if (loadedRequest.current === requestKey) return;
 
+    // 清理函数使账号快速切换后的旧响应不覆盖当前账号信息。
     let active = true;
     setLoading(true);
     setError('');

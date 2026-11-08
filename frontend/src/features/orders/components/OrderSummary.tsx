@@ -12,6 +12,7 @@ interface OrderSummaryProps {
   canCalculate: boolean;
 }
 
+/** 编辑时展示实时计算金额；只读时显示服务端保存的汇总值。 */
 export function OrderSummary({ saved, editing, subtotal, gst, onCalculate, canCalculate }: OrderSummaryProps) {
   const values = !editing && saved ? saved.summary : { subtotal_ex_gst: subtotal, gst_amount: gst, shipment_fee: 0, total: subtotal + gst };
   return <section className="amount-summary"><dl className="summary-lines">

@@ -69,7 +69,7 @@ def build_rtt_xml(shipping_date: date | None = None) -> str:
     rated = ET.SubElement(root, "ratedTransitTimeEnquiry")
     cutoff = ET.SubElement(rated, "cutOffTimeEnquiry")
     for tag, values in (
-        ("collectionAddress", ("Ryde", "NSW", "2111")),
+        ("collectionAddress", ("Ryde", "NSW", "2112")),
         ("deliveryAddress", ("Fitzroy", "VIC", "3065")),
     ):
         address = ET.SubElement(cutoff, tag)
@@ -100,7 +100,7 @@ def build_pricing_xml(collection_date: datetime | None = None) -> str:
     ET.SubElement(root, "appVersion").text = "3.2"
     check = ET.SubElement(root, "priceCheck")
     ET.SubElement(check, "rateId").text = "1"
-    for tag, town, state, postcode in (("sender", "Ryde", "NSW", "2111"), ("delivery", "Fitzroy", "VIC", "3065")):
+    for tag, town, state, postcode in (("sender", "Ryde", "NSW", "2112"), ("delivery", "Fitzroy", "VIC", "3065")):
         address = ET.SubElement(check, tag)
         ET.SubElement(address, "country").text = "AU"
         ET.SubElement(address, "town").text = town

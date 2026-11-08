@@ -1,195 +1,56 @@
-# Order Track Application
+# Order Tracking Application
 
-面向澳大利亚订单履约场景的全栈订单管理系统。系统按订单独立展示客户、商品行、GST、Shipment 和物流信息，使用 AUD，并连接 Australia Post 测试 API 查询邮费服务和运单状态。
+面向澳大利亚订单履约场景的全栈订单管理系统，涵盖订单、SKU 商品、AUD/GST 金额、Shipment、运费报价和物流追踪。
 
-## 功能
 
-- **订单管理**：搜索、筛选、创建和更新订单；按业务状态流转。
-- **商品目录**：按 SKU 搜索、查看、添加和编辑商品信息、含 GST 价格、重量及尺寸；被订单行引用的商品不可删除。
-- **承运商管理**：维护承运商资料和启用状态；仍被 Shipment 引用的承运商不可删除，可停用以阻止新 Shipment 使用。
-- **Shipment 管理**：将订单行分配给 Shipment，维护 Tracking Number 和历史费用。
-- **Shipping Planner**：为 Shipment 选择订单行、计算商品重量、输入包裹信息、查询报价并应用所选运费。
-- **报价账号档案**：按 Shipment 选择服务端预先配置的报价账号；历史 Shipment 保存账号档案引用和掩码账号。
-- **Tracking**：查询运单状态、更新时间和事件；无法查询时明确显示错误或不可用状态。
-- **API Testing**：查看报价账号关联的 Australia Post 邮寄产品、合同有效期及可用功能。
-- **请求日志**：记录前后端请求生命周期，并使用 Request ID 关联应用请求与承运商请求。
+## Contents
 
-## 技术栈
+- [项目概览](#overview)
+- [Quick Start / 快速启动](#quick-start)
+- [功能范围与实现状态](#features-and-status)
+- [技术栈与项目结构](#technology-and-structure)
+- [输入数据、数据结构与 SKU 匹配](#input-data-and-sku-matching)
+- [商品图片说明](#product-image-note)
+- [金额计算规则](#money-and-gst)
+- [Shipment 运费设计](#shipment-fee-design)
+- [物流追踪与承运商接口](#tracking-and-carrier-integrations)
+- [实现难点与设计取舍](#engineering-decisions)
+- [环境变量配置](#configuration)
+- [API 概览](#api-reference)
+- [测试与构建](#testing)
+- [日志与故障排查](#logging-and-troubleshooting)
+- [安全说明与当前限制](#security-and-limitations)
+- [许可证](#license)
 
-| 区域 | 技术 |
-| --- | --- |
-| 前端 | React 18、TypeScript、Vite、MUI、React Router |
-| 后端 | Python、FastAPI、Pydantic、SQLAlchemy、HTTPX |
-| 数据库 | SQLite；SQLAlchemy ORM；JSON 种子数据 |
-| 测试 | pytest、Playwright、TypeScript 编译检查 |
+<a id="overview"></a>
+## 项目概览
 
-## 架构
+系统将订单作为履约和金额汇总的边界。每笔订单包含客户收货信息、SKU 订单行和零个或多个 Shipment；订单总额由订单行金额及 Shipment 运费组成。核心订单和商品功能在没有承运商凭据时仍可本地运行。
 
-```mermaid
-flowchart LR
-    Web[React SPA]
-    Proxy[Vite API proxy]
-    API[FastAPI routes]
-    Domain[Validation and application services]
-    DB[(SQLite)]
-    Carrier[Australia Post test API]
-    Config[Server environment]
-    Logs[Structured logs]
+订单页面支持桌面、平板和窄屏布局。用户可以维护商品与承运商、管理订单状态和 Shipment、查看报价及追踪事件，并通过 Request ID 将浏览器请求与后端日志关联起来。
 
-    Web --> Proxy --> API --> Domain
-    Domain --> DB
-    Domain --> Carrier
-    Config -. credentials .-> Domain
-    Web -. X-Request-ID .-> Logs
-    API -. request lifecycle .-> Logs
-```
+<a id="quick-start"></a>
+## Quick Start / 快速启动
 
-前端通过统一 API 客户端请求 `/api`；Vite 在本地开发时将请求代理至 FastAPI。后端路由进行输入校验并调用应用服务。数据库读写、金额计算、订单状态和 Shipment 关联由后端负责。承运商凭据只从服务端环境配置读取。
+### 环境要求
 
-## 项目结构
+- Python 3.10 或更高版本
+- Node.js 18 或更高版本及 npm
+- 承运商凭据不是启动核心 OMS 功能的前提；真实 Australia Post 请求需要有效的服务端账号和凭据
 
-```text
-backend/
-  app/
-    routes/             FastAPI 路由
-    database.py         SQLAlchemy 模型、数据库初始化与种子导入
-    db_service.py       订单、商品和 Shipment 业务逻辑
-    shipping_service.py Australia Post 报价适配器
-    tracking_service.py 承运商 Tracking 适配器
-    logging_service.py  结构化日志与敏感字段遮盖
-  tests/                后端 API 与服务测试
-scripts/
-  tnt_smoke.py          与应用分离的 TNT 请求探测工具
-frontend/
-  src/
-    features/orders/    订单相关组件
-    features/api-testing/账号产品查询页面
-    features/shipping/  报价账号选择与邮寄产品展示组件
-    shared/             API 客户端、类型、格式化和公共组件
-    main.tsx            应用路由与页面组合
-  e2e/                  Playwright 端到端测试
-data/
-  orders.json           合成订单种子数据
-  products.json         商品种子数据
-  source/               SKU 查询结果的本地快照
-```
-
-## 数据来源与输入结构
-
-- `data/orders.json` 包含两笔基础订单以及各自独立的订单行和 Shipment。应用逐单读取与计算，不会把不同客户的订单合并。
-- `data/products.json` 是 SKU 商品数据的本地 JSON 快照，保存 SKU、名称、描述、含 GST 的 RRP、重量和尺寸。`data/source/sku-query-result.json` 保存用于整理该快照的查询结果；运行时不连接 SQL-like 查询页面，也不把它当作外部 API。
-- 商品图片区域使用通用占位图，不代表真实商品图片。
-- 新增测试订单时，订单应提供订单编号、日期、状态、客户、配送地址、订单行和 Shipment。订单行以 SKU 匹配商品目录，并包含正整数数量；已分配的历史订单行通过 `tracking_group` 对应 Shipment。商品记录以 SKU 为主键，金额以 AUD 字符串保存，重量与尺寸应带明确单位。
-
-最小订单输入示例：
-
-```json
-{
-  "currency": "AUD",
-  "orders": [
-    {
-      "order_id": "PO-EXAMPLE-0001",
-      "order_date": "2026-01-15",
-      "status": "Draft",
-      "company_name": "Example Company",
-      "customer": {
-        "name": "Example Customer",
-        "phone": "0400000000",
-        "email": "customer@example.com"
-      },
-      "shipping_address": {
-        "street": "1 Example Street",
-        "suburb": "Sydney",
-        "state": "NSW",
-        "postcode": "2000",
-        "country": "Australia"
-      },
-      "line_items": [{ "sku": "AURPUR10", "quantity": 1, "tracking_group": null }],
-      "shipments": []
-    }
-  ]
-}
-```
-
-以上仅展示订单 JSON 的主要字段；完整字段和验证规则以种子数据、FastAPI schema 及 OpenAPI 文档为准。
-
-## 业务规则
-
-- 商品目录 RRP 是新增订单行的默认含税价格；创建或编辑订单时可以为具体订单行手动覆盖。服务端校验正数金额并将 RRP 保存为订单行价格快照，后续商品目录价格变更不会改写已保存订单。
-- RRP 含 GST；新增订单行默认 GST 税率为 10%，并可按订单行编辑。服务端以含税 RRP 行总额计算 GST，按 HALF_UP 舍入至分，再用差额得到未税行小计；展示用未税单价单独舍入，不参与行小计计算。金额以整数分保存，订单总额由未税小计、各行 GST 和已保存 Shipment 运费组成。
-- Order Lines 中的 Assigned Tracking 只读显示对应 Shipment 的 Tracking Number；其值从 Shipment 关联派生，不在订单行中重复存储。
-- 新增订单行默认不分配 Shipment；每条订单行最多关联一个 Shipment。创建和更新时校验 SKU、数量及 Shipment 与订单的归属关系。
-- 状态依次为 `Draft → Confirmed → In Transit → Completed`。`Confirmed` 和 `In Transit` 可退回 `Draft`；`Completed` 为终态。进入 `In Transit` 前至少需要一个非空 Tracking Number。
-- 报价只在用户选择服务并成功应用后计入 Shipment 运费。修改报价输入会使当前报价选择失效；服务端校验报价有效期及其订单/Shipment 关联。
-
-金额计算示例（RRP A$19.99、数量 100、GST 10%）：含税行总额为 A$1,999.00；行 GST 为 `ROUND_HALF_UP(1,999.00 × 10 / 110, 2) = A$181.73`；未税行小计为 A$1,817.27。界面显示的未税单价 A$18.17 仅供阅读，避免先舍入单价再乘数量造成累计误差。
-
-## 数据与计算假设
-
-- 输入数据中给出的报价起点为 Ryde, NSW 2111；本地测试时，当前 Australia Post 配置对该起点返回必填属性错误，而 Richmond, VIC 3121 可正常报价。因此 Shipping Rates 和 Shipping Planner 默认使用 Richmond。此默认值记录的是当前测试结果，不代表所有 Australia Post 账号都必须使用该地点；起点仍由请求表单传入，账号合同与上游校验可能限制可用地点。
-- 基础订单中已有的 Shipment 运费是本地保存的历史金额；打开 Tracking 或刷新物流信息不会重新计算或覆盖已保存运费。新 Shipment 运费来自成功返回并应用的 Australia Post 服务报价。若接口无可用服务、报价失败或承运商尚未集成，则不会生成虚构费用。
-- 运单号、物流事件和服务价格以已保存种子数据或上游 API 返回为准。API 不可用、未查询或未实现时，页面显示相应状态，不补造实时结果。
-
-## 承运商集成
-
-Carrier 是业务界面中的承运商选项，`integration_type` 决定后端实际调用哪个 API 适配器。目前 Australia Post 和 StarTrack 两个选项的 `integration_type` 都是 `AUSTRALIA_POST`，所以它们的报价和 Tracking 都经由同一套 Australia Post API 适配器处理；项目没有单独的 StarTrack API 适配器。`rate_capability` 和 `tracking_capability` 是承运商描述字段，不作为后端请求权限开关；是否能请求由有效承运商、适配器实现及上游账号授权共同决定。
-
-报价请求使用用户选定的 Pricing Account 档案，该档案决定报价时使用的账号和合同服务范围。Tracking 页面目前不提供账号选择，使用服务端的 `AUSTRALIA_POST_TRACKING_ACCOUNT_NUMBER`；未配置时依次回退到旧共享账号和报价账号。因此，报价账号与 Tracking 账号可以分别配置，但当前代码并不会因为选择 StarTrack 就自动换到另一套 API 或账号。
-
-- 报价使用 Australia Post 测试端点 `/shipping/v1/prices/shipments`。
-- Australia Post 根据请求中的账号、起点、目的地和包裹信息返回可用邮寄服务及价格；应用展示上游报价，不使用本地固定费率公式生成报价。用户选择并应用服务后，系统保存 Shipment 的运费、邮寄产品 ID 和报价来源。
-- Tracking 请求由后端代理；前端不直接持有 API key、密码或账号号。
-- 测试环境返回结果取决于账号授权、测试数据、网络和上游服务。测试报价不代表承运合同价格。
-- **TNT 尚未集成到订单或 API Testing 页面**；当前应用不会将 TNT 请求转发给 Australia Post，也不会伪造 TNT 报价或物流状态。基础数据中的 TNT Shipment Fee 为 A$0.00，Tracking 查询会返回未实现/不可用状态。`scripts/tnt_smoke.py` 是独立的请求探测工具，不构成应用集成。后续 TNT 适配器计划在 `feature/tnt-api` 分支开发。
-
-## 环境配置
-
-将项目根目录 `.env.example` 复制为 `.env`，只在本地或部署平台的服务端密钥配置中填写实际值。核心订单和商品功能无需承运商凭据即可启动。
-
-| 变量 | 用途 |
-| --- | --- |
-| `DATABASE_URL` | 数据库连接；留空时使用 `data/oms.db` |
-| `AUSTRALIA_POST_API_KEY` | Australia Post API 用户名 / Key |
-| `AUSTRALIA_POST_API_PASSWORD` | Australia Post API 密码 |
-| `AUSTRALIA_POST_PRICING_ACCOUNT_NUMBER` | 报价账号；未设置时回退至旧共享账号变量 |
-| `AUSTRALIA_POST_PRICING_ACCOUNT_LABEL` | 单账号兼容配置的界面显示名称；默认 `eParcel and International` |
-| `AUSTRALIA_POST_ACCOUNT_PROFILES_JSON` | 报价账号档案数组；每个档案引用账号号码及凭据对应的服务端环境变量 |
-| `AUSTRALIA_POST_ACCOUNT_SAME_DAY` | Same Day Services 报价账号；仅保存在服务端 `.env` |
-| `AUSTRALIA_POST_ACCOUNT_ST_PREMIUM_EXPRESS` | ST Premium and ST Express 报价账号；仅保存在服务端 `.env` |
-| `AUSTRALIA_POST_ACCOUNT_ON_DEMAND` | On Demand (OD) 报价账号；仅保存在服务端 `.env` |
-| `AUSTRALIA_POST_TRACKING_ACCOUNT_NUMBER` | 可选 Tracking 账号；未设置时依次回退到旧共享账号和报价账号 |
-| `AUSTRALIA_POST_ACCOUNT_NUMBER` | 兼容旧本地配置的共享账号变量 |
-| `AUSTRALIA_POST_BASE_URL` | API 根地址；默认使用 Australia Post 测试环境 |
-
-账号号码在项目根目录的本地 `.env` 配置；该文件被 Git 忽略。`.env.example` 只列出变量名和档案结构，不包含账号号码、API Key 或密码。多个报价账号按固定 ID、显示名称和环境变量引用配置，例如：
-
-```dotenv
-AUSTRALIA_POST_ACCOUNT_PROFILES_JSON='[{"id":"eparcel-international","label":"eParcel and International","account_number_env":"AUSTRALIA_POST_PRICING_ACCOUNT_NUMBER","default_for_pricing":true},{"id":"same-day-services","label":"Same Day Services","account_number_env":"AUSTRALIA_POST_ACCOUNT_SAME_DAY"},{"id":"st-premium-express","label":"ST Premium and ST Express","account_number_env":"AUSTRALIA_POST_ACCOUNT_ST_PREMIUM_EXPRESS"},{"id":"on-demand","label":"On Demand (OD)","account_number_env":"AUSTRALIA_POST_ACCOUNT_ON_DEMAND"}]'
-```
-
-`id` 必须唯一且使用小写字母、数字和连字符；`label` 必须唯一并作为界面名称；`account_number_env` 指定账号号变量，账号号按 1–20 位数字字符串校验并保留前导零，不得转换为整数；只能有一个 `default_for_pricing: true`。每个档案也可通过 `api_key_env`、`api_password_env` 和 `base_url_env` 指向单独的服务端环境变量；省略时使用共享的 Australia Post API 凭据和 API 根地址。浏览器只接收档案 ID、名称、环境和掩码账号。Tracking 仍使用独立的 `AUSTRALIA_POST_TRACKING_ACCOUNT_NUMBER` 配置。
-
-API Testing 下的 Account Products 和 Shipping Rates 页面都支持选择已配置档案；Shipping Planner 也按 Shipment 选择报价账号。Get Rates 查询所选账号对当前包裹和路线可用的服务，Apply 后 Shipment 保存账号档案、返回的邮寄产品 ID 及运费快照。
-
-`.env.example` 中的 `TNT_*` 变量仅供 `scripts/tnt_smoke.py` 的显式接口试验使用；当前应用 API 和页面尚未集成 TNT。
-
-## 本地运行
-
-需要 Python 3.10+ 和 Node.js 18+。
-
-### 启动后端
+### 1. 启动后端
 
 ```bash
 cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8003
+python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8003
 ```
 
-这里只安装 `requirements.txt` 中的运行依赖即可启动服务。`requirements-dev.txt` 用于运行后端测试；它会包含运行依赖，并额外安装 `pytest`。
+### 2. 启动前端
 
-### 启动前端
+在另一个终端中运行：
 
 ```bash
 cd frontend
@@ -197,15 +58,232 @@ npm ci
 npm run dev -- --host 127.0.0.1 --port 5176
 ```
 
-前端地址：<http://127.0.0.1:5176/>
+### 3. 打开应用
 
-后端健康检查：<http://127.0.0.1:8003/api/health>
+- Web 应用：<http://127.0.0.1:5176/>
+- API 健康检查：<http://127.0.0.1:8003/api/health>
+- FastAPI / OpenAPI 文档：<http://127.0.0.1:8003/docs>
 
-本地 OpenAPI 文档：<http://127.0.0.1:8003/docs>
+首次启动会创建数据库表，并将 `data/products.json` 和 `data/orders.json` 中尚未存在的记录导入 SQLite。默认数据库为 `data/oms.db`。种子导入是幂等的，不会用 JSON 样例覆盖已有数据库记录。
 
-首次启动会创建 SQLite 表并幂等导入 `data/` 中的种子数据。`create_all` 和当前的 SQLite 兼容迁移只覆盖项目已有场景，不替代通用数据库迁移工具。
+若只运行核心 OMS 页面，不需要创建 `.env`。配置承运商 API 前，可将仓库根目录的 `.env.example` 复制为 `.env`，并只在服务端填写获授权的账号和凭据。
 
+<a id="features-and-status"></a>
+## 功能范围与实现状态
+
+| 功能 | 当前状态 | 说明 |
+| --- | --- | --- |
+| 订单管理 | 已实现 | 搜索、筛选、创建、编辑草稿和状态流转 |
+| SKU 商品目录 | 已实现 | 搜索、添加、编辑；被历史订单引用的商品不能删除 |
+| Shipment 管理 | 已实现，部分拆分未支持 | 分配订单行、保存运单号、记录报价费用和追踪结果；一条订单行目前只能完整分配给一个 Shipment，不能将数量拆到多个 Shipment |
+| Shipment 运费报价 | 已实现，需有效账号 | 查询适用服务；只有用户选择并应用报价后才保存费用 |
+| Australia Post Tracking | 已实现，受测试账号权限限制 | 返回状态、整票事件和 Article 事件；异常状态明确显示 |
+| StarTrack | 通过现有适配器处理 | 当前与 Australia Post 使用相同的 `AUSTRALIA_POST` 适配器，不是独立的 StarTrack API 集成 |
+| TNT 报价与 Tracking | **未集成** | 使用文档账号信息，接口调用返回401未认证，目前应用返回 `NOT_IMPLEMENTED` |
+| 运单创建、面单和取件 | 未实现 | 保存 Shipment 与 Tracking Number 不会在承运商系统创建真实托运单 |
+| 用户登录与权限 | 未实现 | 当前是本地/受控环境的演示应用，没有用户认证和角色授权 |
+
+订单状态按 `Draft → Confirmed → In Transit → Completed` 前进；进入 `In Transit` 前至少需要一个 Tracking Number。草稿订单至少有一个订单行，但订单行可暂不分配 Shipment；一条订单行及其全部数量最多关联一个 Shipment。比如数量为 5 的一行不能拆成 2 件放入 Shipment A、另 3 件放入 Shipment B。`Completed` 订单只读。
+
+`scripts/tnt_smoke.py` 是独立的诊断脚本，不属于 OMS 的 TNT 集成。
+
+<a id="technology-and-structure"></a>
+## 技术栈与项目结构
+
+| 区域 | 技术与版本范围 |
+| --- | --- |
+| 前端 | React 18、TypeScript 7、Vite 6、MUI 9、React Router 6 |
+| 后端 | Python 3.10+、FastAPI 0.115+、Pydantic 2.7+、SQLAlchemy 2、HTTPX 0.27+、Uvicorn 0.30+ |
+| 数据库 | SQLite（默认）；通过 SQLAlchemy 访问 |
+| 自动化检查 | pytest 8、Playwright 1.65+、TypeScript 编译检查 |
+
+依赖范围以 `backend/requirements.txt`、`backend/requirements-dev.txt` 和 `frontend/package.json` 为准。
+
+```text
+backend/
+  app/
+    routes/                 FastAPI API 路由
+    models.py               请求与响应 schema、输入校验
+    database.py             SQLAlchemy 模型、SQLite 初始化与种子导入
+    db_service.py           订单、商品、Shipment 和金额业务逻辑
+    shipping_service.py     Australia Post 报价与账号服务
+    tracking_service.py     Australia Post / StarTrack 追踪适配器
+    request_logging.py      Request ID、脱敏参数摘要和异常调用帧
+    logging_service.py      JSON 日志格式化和敏感信息遮盖
+  tests/                    后端 API 与服务测试
+frontend/
+  src/
+    app/                    路由、全局主题与应用布局
+    features/               按订单、商品、承运商、运费和追踪划分的页面与组件
+    shared/                 API 客户端、类型、金额格式化和公共组件
+  e2e/                      Playwright 端到端测试
+scripts/
+  tnt_smoke.py              独立的 TNT 请求探测工具
+data/
+  orders.json               合成订单种子数据
+  products.json             SKU 商品目录种子数据
+  source/                   整理商品目录时保留的来源快照
+```
+
+前端使用按路由懒加载；业务页面位于 `features/`，通用请求、格式化和布局代码位于 `shared/`。Vite 在本地开发时将 `/api` 请求代理到 FastAPI。
+
+<a id="input-data-and-sku-matching"></a>
+## 输入数据、数据结构与 SKU 匹配
+
+### 数据来源
+
+- `data/orders.json` 提供演示订单。订单包含订单编号、日期、状态、公司、客户、配送地址、订单行和 Shipment。
+- `data/products.json` 提供商品目录，包含 SKU、名称、描述、含 GST 的 RRP，以及可选重量和尺寸。
+- `data/source/sku-query-result.json` 是整理商品数据时保存的本地来源快照；应用运行时不调用该查询页面，也不把它当作在线 API。
+- 应用启动后，SQLite 是运行时数据源。新增订单和商品保存到数据库，不写回种子 JSON。
+
+订单行的关键结构如下；示例 SKU 仅用于说明字段，不绑定评测订单：
+
+```json
+{
+  "sku": "SKU-EXAMPLE",
+  "quantity": 2,
+  "tracking_group": null,
+  "rrp_incl_gst": "19.99",
+  "gst_rate_percent": "10.00"
+}
+```
+
+### SKU 匹配与无效输入
+
+- 创建订单时，后端按订单行的 `sku` 查询商品目录，并从商品记录补充名称、描述和产品重量；算法不依赖固定订单号或固定 SKU。
+- 订单中的 SKU 必须在商品目录中存在。API 遇到未知 SKU 会拒绝保存并返回校验错误（HTTP 422），不会创建临时商品或静默使用错误价格。
+- API 的订单行数量必须是严格的正整数；缺失、零、负数、小数或字符串数量会被 schema 校验拒绝（HTTP 422）。订单至少需要一条订单行。
+- 初始化时，商品目录和订单种子会先复用 `ProductCatalog`、`OrderDataset` 等 Pydantic 模型校验，再写入数据库。数量必须是正整数；收货地址、邮箱、商品字段和 Shipment 分组也会执行对应约束。
+- 种子订单的 SKU 必须存在于种子目录或当前商品表中。未知 SKU 或非法数据会在商品/订单写入前被拒绝，避免校验失败后留下部分导入结果。
+- 商品 SKU 在创建商品时会去除首尾空格并转为大写；订单行应使用目录中的 SKU。编辑商品不会改写已保存订单行中的价格快照。
+
+样例订单和商品仅作为数据输入，不是写在业务逻辑中的评测答案。替换 JSON 数据时，只要满足 schema 和业务约束，列表、SKU 查找及金额计算都按收到的数据处理。
+
+<a id="product-image-note"></a>
+## 商品图片说明
+
+订单行目前共用 `frontend/src/assets/m1.png` 作为示意商品图片。图片用于界面展示，不是按 SKU 匹配的商品实拍图，也不代表订单中的真实商品、包装或标签；商品识别和金额计算都不依赖图片。
+
+<a id="money-and-gst"></a>
+## 金额计算规则
+
+### 当前代码行为
+
+- 货币为 AUD，数据库以整数分保存金额；金额换算使用 `Decimal`，按 `ROUND_HALF_UP` 舍入到两位小数，避免二进制浮点误差。
+- RRP 是含 GST 价格。订单行的含税总额为 `RRP × Quantity`。
+- 每行未税小计从含税行总额反算：先按该行税率计算含税金额中的 GST 并舍入，再以 `Line Gross − Line GST` 得到未税小计。展示的未税单价单独舍入，仅供阅读，不再用于乘数量计算。
+- 同一税率组的未税小计先汇总，再按 `ROUND_HALF_UP(Group Subtotal Ex GST × Tax Rate, 2)` 计算 GST。全部为 10% 时，这等于评测公式 `ROUND_HALF_UP(Order Subtotal Ex GST × 10%, 2)`；混合税率时按各税率组分别计算后相加。
+- 订单总额为 `Subtotal Ex GST + GST + Shipment Fees`。Shipment 费用单独保存和计入总额。
+- 新订单行默认使用商品目录 RRP 和 10% GST；编辑订单时可以按行覆盖价格和税率，后续目录变更不会改写已保存订单行快照。
+
+前端编辑预览、后端保存和数据库启动时的历史订单汇总都使用订单级舍入规则。订单行未税小计仍从各行含税 RRP 反算，因此在一分钱边界上，订单 GST 加未税小计可能与各行含税 RRP 合计差一分钱；这是采用评测汇总口径带来的舍入差异。
+
+常规示例：含税 RRP 为 A$19.99、数量 100、GST 10%。含税行总额是 A$1,999.00，未税小计为 A$1,817.27；订单级 GST 为 A$1,817.27 × 10% = A$181.73。展示未税单价 A$18.17 不参与小计计算。
+
+舍入边界示例：含税 RRP 为 A$49.99、数量 1、GST 10%。该行未税小计为 A$45.45；按评测公式，订单 GST 为 A$4.55，未税小计加 GST 为 A$50.00，比行含税 RRP 多 A$0.01。订单总额使用订单级 GST 作为权威汇总值。
+
+评测公式适用于全部按 10% 计税的订单。若订单行税率不同，不能把整笔未税小计统一乘 10%；本项目按各税率分组计算，`gst_rate` 汇总字段会显示 `Mixed rates`。
+
+<a id="shipment-fee-design"></a>
+## Shipment 运费设计
+
+### 计算方式与保存方式
+
+- 应用使用 Australia Post 报价 API 返回实际可用服务和价格，不以本地固定费率公式生成报价。
+- 报价依据包括服务端选定的账号档案、起运地址、目的地地址，以及包裹毛重和外包装长、宽、高。Shipping Planner 从已选择订单行汇总商品净重，包裹毛重不能低于商品净重；尺寸和包装重量由用户确认。
+- 当前 Shipping Planner UI 每个 Shipment 输入一个包裹。一个订单可以有多个 Shipment；每个 Shipment 的已应用报价单独保存，订单级运费等于所有 Shipment 已保存费用之和。
+- 当前关联模型按整条订单行分配：同一订单行的数量不能拆到多个 Shipment，也不能在同一订单行上分别保存多个包裹的部分履约数量。若实际业务需要分批发货，应先把订单行建模为可分配数量的履约单位，再允许按剩余数量拆分 Shipment；目前该能力尚未实现。
+- 报价请求成功不等于保存费用。只有用户选定报价并应用后，系统才写入 Shipment 运费、服务产品 ID、账号展示快照、报价来源和时间。
+- 不存在可用报价、报价失败、用户尚未应用报价或承运商未接入时，不生成虚构金额；Shipment 保持未报价，费用为 A$0.00，订单其余流程仍可继续。已有种子 Shipment 的历史费用保留，不会被追踪查询覆盖。
+
+### 设计思考与业务假设
+
+运费会随承运商账号、服务资格、起讫地址和包裹重量、尺寸变化；同一商品从不同地区或使用不同服务寄出，费用也可能不同。因此本项目优先使用承运商返回的报价，而不采用一个固定的“每公斤价格”冒充实际报价。SKU 重量用于估算包裹内商品净重；由于商品目录不包含实际包装材料及打包方式，包裹毛重和外包装尺寸由操作人员按本次包裹填写并确认。
+
+本项目将 Shipment 视为单独询价和保存费用的单位：`订单运费 = 所有已应用 Shipment 报价之和`，`订单总额 = 未税小计 + GST + 订单运费`。这样每票费用都能对应到承运商、服务产品及包裹输入，也避免把多票费用平均摊回商品行。只有用户选中并应用有效报价后，该票费用才进入订单汇总。
+
+如果没有可用的承运商 API，另一种可解释的估算思路是先比较实重和体积重，再按计费重与费率计算：
+
+```text
+体积重（kg） = 长（cm） × 宽（cm） × 高（cm） ÷ 承运商体积系数
+计费重（kg） = max（包裹毛重，体积重）
+估算运费 = 基础费 + 计费重 × 每公斤费率 + 适用的偏远地区附加费
+```
+
+体积系数、费率、重量进位规则和偏远地区范围都必须来自具体承运商的费率表或合同，不能使用一个假设值冒充通用市场价格。该公式仅记录为备选设计思路；当前项目没有用它生成运费，实际费用来自已应用的承运商 API 报价；无报价时仍按前述规则显示 A$0.00。
+
+如果承运商没有返回报价、账号无权查询、请求失败或该承运商尚未接入，系统保留 A$0.00 并允许继续处理订单；这表示“当前没有可用报价”，不代表承运商承诺免费。TNT 属于评测加分项，当前未接入，因此其报价费用为 A$0.00。Australia Post 的可用报价则仍取决于已授权账号和 testbed 状态。
+
+### 地址默认值
+
+- 起运地址默认值为 Ryde, NSW 2112，可在报价表单中修改。该值是应用默认输入，不代表每个承运商账号的合同揽收地址都支持它。
+- 订单内 Shipping Planner 会从当前订单的收货街道、地址第二行、Suburb、State、Postcode 和 Country 初始化目的地，并将 Australia 转成报价接口使用的 `AU`。用户仍可在询价前修改地址。
+- 已保存 Shipment 中已有的目的地会作为该 Shipment 的地址快照保留；没有保存目的地的新 Shipment 或旧 Shipment 会从当前订单收货地址带入。独立 Shipping Rates 测试页没有订单上下文，仍使用示例 Sydney 地址。
+
+<a id="tracking-and-carrier-integrations"></a>
+## 物流追踪与承运商接口
+
+### Australia Post 与 StarTrack
+
+- 当前 Tracking 由后端代理 Australia Post testbed 请求，前端不保存承运商 API 密钥或密码。
+- 订单界面中的 Australia Post 和 StarTrack 都映射到 `integration_type = AUSTRALIA_POST`，由同一套 API 适配器处理。当前项目没有单独的 StarTrack API endpoint、凭据路由或适配器。
+- 追踪账号可通过 `AUSTRALIA_POST_TRACKING_ACCOUNT_NUMBER` 配置；未设置时回退到旧共享账号，再回退到报价账号。账号授权和 testbed 数据会影响实际结果。
+- 追踪结果会标准化为整票状态、Article 状态和事件时间线；短期缓存降低重复请求。`not_queried`、`not_found`、`unavailable` 和 `not_implemented` 会明确区分，不会伪造实时事件。
+
+### 异常行为
+
+认证被拒、超时、网络/TLS 错误、HTTP 错误、无效 JSON 或不符合预期的响应会转成可显示的错误状态和错误码。无法查询时，页面保留错误类别，用户可以重试；缺少运单号时不会发出追踪请求。上游没有返回事件时，页面显示空状态，不补造物流进度。
+
+### TNT
+
+TNT Tracking 与 Pricing 在 OMS API 和页面中均为 `NOT_IMPLEMENTED`。系统不会用 Australia Post 冒充 TNT 查询，也不会显示伪造的 TNT 价格或追踪事件。`scripts/tnt_smoke.py` 是独立探测工具，只有在本地服务端环境变量中配置相应 TNT 测试凭据并显式运行时才会请求 TNT；脚本测试结果不等于应用集成成功。
+
+截至当前版本，项目尚无经过验证成功的真实 TNT UAT 调用，因此不能将 RTT 报价或 ExpressConnect Tracking/Pricing 描述为已打通。`backend/tests/test_tnt_smoke.py` 使用模拟 HTTP 响应验证请求构造、响应解析和错误分类，不会访问 TNT；真实账号的接口授权和 UAT 联调仍需单独确认。
+
+<a id="engineering-decisions"></a>
+## 实现难点与设计取舍
+
+| 难点 / 风险 | 当前处理方式 | 采用原因与边界 |
+| --- | --- | --- |
+| 金额精度及 GST 舍入 | 使用 `Decimal`、整数分和 HALF_UP；同税率订单在订单小计上舍入 | 满足评测的订单级 GST 公式；混合税率时按税率分组，并接受分币边界下汇总金额可能与含税行金额相差一分 |
+| 订单行与多个 Shipment 的关系 | 订单行通过关联表完整分配给一个 Shipment；不支持按数量拆分一行 | 让订单总额、包裹内容和追踪号维持一致；当前 Planner 以一个 Shipment 一个包裹为输入，部分履约需要扩展数量分配模型 |
+| 外部 API 失败或响应不一致 | 后端适配器归一化状态、事件及错误，前端显示 unavailable 等状态 | 外部服务故障不应让订单详情无法使用，也不应展示推测出来的物流数据 |
+| 账号凭据和日志可追踪性 | 凭据留在服务端；使用 Request ID、结构化日志和敏感字段遮盖 | 便于把前端、API 和承运商请求关联起来，同时降低日志中的个人资料和凭据暴露 |
+| 目的地与订单收货地址 | 订单内 Planner 从收货地址初始化，保留已保存 Shipment 的目的地快照 | 避免新 Shipment 默认报到示例邮编，同时允许用户按实际包裹情况修正地址 |
+
+
+<a id="configuration"></a>
+## 环境变量配置
+
+将 `.env.example` 复制为项目根目录 `.env`，仅在服务端填写获授权的值。`.env` 已加入 Git 忽略规则。
+
+```bash
+cp .env.example .env
+```
+
+| 变量 | 用途 |
+| --- | --- |
+| `DATABASE_URL` | 数据库连接；留空时使用 `data/oms.db` |
+| `AUSTRALIA_POST_API_KEY` | Australia Post API 用户名 / Key |
+| `AUSTRALIA_POST_API_PASSWORD` | Australia Post API 密码 |
+| `AUSTRALIA_POST_PRICING_ACCOUNT_NUMBER` | 默认报价账号号码 |
+| `AUSTRALIA_POST_PRICING_ACCOUNT_LABEL` | 默认报价账号的界面名称 |
+| `AUSTRALIA_POST_ACCOUNT_PROFILES_JSON` | 多个报价账号档案配置，档案引用账号与凭据变量名 |
+| `AUSTRALIA_POST_ACCOUNT_SAME_DAY` | Same Day Services 报价账号（可选） |
+| `AUSTRALIA_POST_ACCOUNT_ST_PREMIUM_EXPRESS` | ST Premium / ST Express 报价账号（可选） |
+| `AUSTRALIA_POST_ACCOUNT_ON_DEMAND` | On Demand 报价账号（可选） |
+| `AUSTRALIA_POST_TRACKING_ACCOUNT_NUMBER` | 独立 Tracking 账号（可选） |
+| `AUSTRALIA_POST_ACCOUNT_NUMBER` | 旧版共享账号回退配置 |
+| `AUSTRALIA_POST_BASE_URL` | API 根地址；留空时使用代码配置的 testbed 默认值 |
+| `TNT_RTT_*`、`TNT_EXPRESSCONNECT_*` | 仅供独立 TNT 探测脚本使用，不启用应用 TNT 集成 |
+
+`AUSTRALIA_POST_ACCOUNT_PROFILES_JSON` 中的 `id` 是前端选择器使用的稳定 ID；`account_number_env`、`api_key_env`、`api_password_env` 和 `base_url_env` 指向服务端变量名，不应直接写凭据。详细示例和可选字段见 `.env.example`。浏览器只接收档案 ID、名称、环境和掩码账号。
+
+<a id="api-reference"></a>
 ## API 概览
+
+本地完整 schema 与交互式请求示例见 <http://127.0.0.1:8003/docs>。
 
 | 资源 | 主要路由 |
 | --- | --- |
@@ -213,49 +291,53 @@ npm run dev -- --host 127.0.0.1 --port 5176
 | Orders | `GET/POST /api/orders`、`GET/PATCH /api/orders/{order_id}`、`PATCH /api/orders/{order_id}/status` |
 | Shipments | `POST /api/orders/{order_id}/shipments`、`PATCH/DELETE /api/shipments/{shipment_id}` |
 | Carriers | `GET/POST /api/carriers`、`GET/PATCH/DELETE /api/carriers/{carrier_id}` |
-| Shipping | `GET /api/shipping/accounts`、`GET /api/shipping/accounts/{profile_id}/products`、`POST /api/shipping/rates`、`POST /api/shipping/orders/{order_no}/quotes/preview`、`POST /api/shipping/orders/{order_no}/shipments/save`、`POST /api/shipping/orders/{order_no}/quotes/apply`、`POST /api/shipping/shipments/{shipment_id}/apply-rate` |
+| Shipping | `GET /api/shipping/accounts`、`GET /api/shipping/accounts/{profile_id}/products`、`POST /api/shipping/rates`、`POST /api/shipping/shipments/{shipment_id}/apply-rate`、`POST /api/shipping/orders/{order_no}/quotes/preview`、`POST /api/shipping/orders/{order_no}/shipments/save`、`POST /api/shipping/orders/{order_no}/quotes/apply` |
 | Tracking | `POST /api/orders/tracking`、`GET /api/orders/{order_id}/tracking?refresh=false` |
 
-请求和响应字段以 FastAPI OpenAPI 定义及 `backend/app/models.py` 为准。
-旧路径 `GET /api/shipping/account-products` 暂时保留，供现有本地调用兼容；新页面使用带档案 ID 的路径。
+旧路径 `GET /api/shipping/account-products` 暂时保留兼容本地调用；新页面使用带账号档案 ID 的路径。字段约束以 `backend/app/models.py` 和 OpenAPI schema 为准。
 
+<a id="testing"></a>
 ## 测试与构建
 
+后端测试：
+
 ```bash
-# 后端
 cd backend
 pip install -r requirements-dev.txt
 pytest -q
+```
 
-# 前端类型检查、构建和端到端测试
-cd ../frontend
+前端类型检查、生产构建和端到端测试：
+
+```bash
+cd frontend
 npx tsc --noEmit
 npm run build
 npx playwright install chromium  # 首次运行时安装浏览器
 npm run test:e2e
 ```
 
-端到端测试使用固定 API fixtures，不会请求真实承运商服务。真实 Australia Post 请求需要配置有效的服务端凭据，并受测试账号权限限制。
+Playwright 使用固定 API fixtures，不会请求真实承运商服务。承运商真实请求需要服务端有效凭据，并受账号权限、testbed 数据和上游可用性影响。
 
-## 日志
+<a id="logging-and-troubleshooting"></a>
+## 日志与故障排查
 
-后端以 JSON Lines 格式输出日志到终端及 `backend/logs/api-calls.log`，单个日志文件上限 5 MiB，保留 3 份轮转文件。前端请求事件写入浏览器 Console。`X-Request-ID` 用于关联浏览器请求、FastAPI 生命周期事件和承运商上游调用。
+- 后端以 JSON Lines 写入终端和 `backend/logs/api-calls.log`；单文件上限 5 MiB，保留 3 份轮转文件。
+- 前端请求生命周期事件写入浏览器 Console。`X-Request-ID` 在请求响应中往返，用于关联浏览器、FastAPI 和承运商调用日志。
+- 后端未处理异常及前端 API / 网络错误会记录有限的调用位置，便于从 Request ID 和堆栈帧定位代码路径。
+- 参数摘要先做脱敏，再限制为 16 KiB；超限时记录省略原因。日志不保存原始请求头、完整请求/响应正文或异常消息。
+- 客户联系人、地址、认证凭据和完整 Tracking / Article ID 会被遮盖；标识最多保留末四位。日志仍可能包含订单号、SKU、金额和包裹尺寸等业务诊断信息，应限制文件访问并设置适当保留期。
 
-日志不记录认证头、请求/响应正文或完整 Tracking Number；Tracking Number 会遮盖并最多保留末四位。报价日志目前包含起运和目的地邮编，因此日志文件应限制访问并按需要设置保留期限。日志用于运行排查，不是审计系统。
+日志用于运行排查，不是审计系统。排查问题时，先在浏览器 Console 记录 Request ID，再在后端终端或日志文件中搜索同一 ID；不要复制或分享包含个人资料的原始日志。
 
-## 安全说明
+<a id="security-and-limitations"></a>
+## 安全说明与当前限制
 
-- 承运商凭据只应存放在服务端环境变量或部署平台的密钥配置中。
-- 本仓库订单样例由项目维护者确认为合成数据。不要将真实个人资料、业务订单、运单号或生产凭据加入种子文件、截图和日志。
-- 部署环境应配置 HTTPS、适当的网络访问策略、密钥管理、日志数据最小化、数据库迁移与备份，并限制 OpenAPI 文档的访问范围。
-
-## 当前限制
-
-- 待应用报价仅保存在单个后端进程内，15 分钟后过期；服务重启或多实例部署不会共享报价缓存。Account Products 响应也会在单进程内短暂缓存。
-- 当前数据库为 SQLite，没有完整的通用迁移与灾备方案。
-- Australia Post 连接至测试环境，实际服务权限和报价结果依账号及上游状态而异。
-- 本地 Shipment 记录不会自动创建承运商运单、面单或取件任务。
-
-## 许可证
-
-当前仓库尚未包含 `LICENSE` 文件。公开仓库本身不授予代码复制、修改或再分发的许可；添加许可证前，请勿假设本项目可按特定开源许可证使用。
+- 目前没有用户登录、身份认证或角色权限。请只在本机或受控网络中运行，不要直接公开到互联网。
+- API 凭据只放在服务端环境变量或部署平台密钥管理中；`.env.example` 是变量名和配置结构示例，不包含真实账号、API Key 或密码。
+- 订单样例使用合成数据。
+- 默认使用 SQLite，当前初始化和旧 schema 兼容逻辑不是完整的数据库迁移、备份或灾备方案。
+- 报价缓存保存在单个后端进程内并会过期；重启或多实例部署不会共享尚未应用的报价缓存。Account Products 结果也使用进程内短期缓存。
+- Australia Post 使用 testbed；服务资格和价格取决于账号授权、地址、包裹数据和上游状态。报价不是承运合同承诺价。
+- 应用不会自动在承运商平台创建运单、购买面单或安排取件。
+- 发布环境需另行配置 HTTPS、网络策略、密钥管理、数据库迁移和备份，并限制 OpenAPI 文档的访问范围。

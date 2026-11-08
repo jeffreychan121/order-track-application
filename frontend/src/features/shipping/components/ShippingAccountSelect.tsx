@@ -12,6 +12,7 @@ interface ShippingAccountSelectProps {
   missingProfile?: { id: string; label: string; account_number_masked?: string | null } | null;
 }
 
+/** 选择可用于报价的账号档案；前端只接收脱敏信息，凭据留在服务端。 */
 export function ShippingAccountSelect({
   accounts, value, loading = false, disabled = false, onChange, missingProfile = null,
 }: ShippingAccountSelectProps) {

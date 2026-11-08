@@ -27,7 +27,7 @@ def payload(**override):
         "order_date": "2026-11-06",
         "company_name": "Example Health",
         "customer": {"name": "Alex Example", "phone": "0400000000", "email": "alex@example.com"},
-        "shipping_address": {"street": "1 Main Street", "suburb": "Ryde", "state": "NSW", "postcode": "2111", "country": "Australia"},
+        "shipping_address": {"street": "1 Main Street", "suburb": "Ryde", "state": "NSW", "postcode": "2112", "country": "Australia"},
         "line_items": [{"sku": "AURPUR10", "quantity": 2, "tracking_group": "Shipment 1"}],
         "shipments": [{"tracking_group": "Shipment 1", "carrier": "Australia Post / StarTrack", "tracking_number": "TEST-TRACK-1"}],
     }
@@ -55,7 +55,7 @@ def test_startrack_quote_ignores_rate_capability_but_tnt_stays_blocked(client, m
     request = {
         "carrier_id": startrack_id,
         "order_line_ids": [order["line_items"][0]["id"]],
-        "origin": {"type": "MERCHANT_LOCATION", "lines": [], "suburb": "RICHMOND", "state": "VIC", "postcode": "3121", "country": "AU"},
+        "origin": {"type": "MERCHANT_LOCATION", "lines": [], "suburb": "RYDE", "state": "NSW", "postcode": "2112", "country": "AU"},
         "destination": {"type": "STANDARD_ADDRESS", "lines": [], "suburb": "Sydney", "state": "NSW", "postcode": "2000", "country": "AU"},
         "packages": [{"weight_kg": 0.5, "length_cm": 10, "width_cm": 10, "height_cm": 10}],
     }
@@ -104,14 +104,15 @@ def test_previous_json_created_orders_are_migrated_without_duplicates(tmp_path, 
 def test_order_amounts_are_seeded_from_decimal_price_snapshots(client):
     orders = {o["order_id"]: o for o in client.get("/api/orders").json()}
     assert orders["PO-20251130-00072"]["status"] == "completed"
-    # 现在按含税订单行总额计算并舍入 GST，未税金额由差额得出，不再先舍入单价。
+    # GST 以订单未税小计统一按 10% 舍入；未税订单行仍来自含税行总额。
     assert orders["PO-20251130-00072"]["summary"]["subtotal_ex_gst"] == "1937.28"
-    assert orders["PO-20251130-00072"]["summary"]["gst_amount"] == "193.72"
+    assert orders["PO-20251130-00072"]["summary"]["gst_amount"] == "193.73"
     assert orders["PO-20251130-00072"]["summary"]["shipment_fee"] == "10.99"
-    assert orders["PO-20251130-00072"]["summary"]["total"] == "2141.99"
+    assert orders["PO-20251130-00072"]["summary"]["total"] == "2142.00"
     assert orders["PO-20251203-00046"]["status"] == "in_transit"
     assert orders["PO-20251203-00046"]["summary"]["subtotal_ex_gst"] == "1504.55"
-    assert orders["PO-20251203-00046"]["summary"]["total"] == "1655.00"
+    assert orders["PO-20251203-00046"]["summary"]["gst_amount"] == "150.46"
+    assert orders["PO-20251203-00046"]["summary"]["total"] == "1655.01"
     track_groups = {s["tracking_group"]: set(s["related_skus"]) for s in orders["PO-20251203-00046"]["shipments"]}
     assert track_groups == {"Track 2": {"AURPUR10"}, "Track 3": {"HALGEO15", "MCMW10", "MCBO30"}}
 
@@ -160,6 +161,47 @@ def test_draft_line_rrp_can_be_edited_and_is_saved_as_price_snapshot(client):
     assert updated["summary"]["subtotal_ex_gst"] == "224.45"
     assert updated["summary"]["gst_amount"] == "22.45"
     assert updated["summary"]["total"] == "246.90"
+
+
+def test_order_gst_rounds_the_order_subtotal_instead_of_each_line(client):
+    response = client.post("/api/orders", json=payload(line_items=[{
+        "sku": "AURPUR10", "quantity": 1, "tracking_group": "Shipment 1",
+        "rrp_incl_gst": "49.99", "gst_rate_percent": "10.00",
+    }]))
+    assert response.status_code == 201, response.text
+    order = response.json()
+    assert order["line_items"][0]["line_subtotal_ex_gst"] == "45.45"
+    assert order["summary"]["subtotal_ex_gst"] == "45.45"
+    assert order["summary"]["gst_amount"] == "4.55"
+    assert order["summary"]["total"] == "50.00"
+
+
+def test_mixed_rate_orders_round_each_tax_rate_group(client):
+    response = client.post("/api/orders", json=payload(line_items=[
+        {"sku": "AURPUR10", "quantity": 1, "tracking_group": "Shipment 1",
+         "rrp_incl_gst": "110.00", "gst_rate_percent": "10.00"},
+        {"sku": "HALGEO15", "quantity": 1, "tracking_group": "Shipment 1",
+         "rrp_incl_gst": "105.00", "gst_rate_percent": "5.00"},
+    ]))
+    assert response.status_code == 201, response.text
+    summary = response.json()["summary"]
+    assert summary["gst_rate"] == "Mixed rates"
+    assert summary["subtotal_ex_gst"] == "200.00"
+    assert summary["gst_amount"] == "15.00"
+    assert summary["total"] == "215.00"
+
+
+def test_initialization_recalculates_saved_order_gst_using_the_new_order_rule(client):
+    with database.SessionLocal.begin() as session:
+        order = session.scalar(select(OrderRow).where(OrderRow.order_no == "PO-20251130-00072"))
+        order.gst_cents = 19372  # 模拟数据库中保留的旧逐行舍入值。
+        order.total_cents = order.subtotal_ex_gst_cents + order.gst_cents + order.shipping_fee_cents
+
+    database.init_db()
+
+    migrated = client.get("/api/orders/PO-20251130-00072").json()
+    assert migrated["summary"]["gst_amount"] == "193.73"
+    assert migrated["summary"]["total"] == "2142.00"
 
 
 def test_order_line_rrp_must_be_positive(client):
@@ -331,3 +373,67 @@ def test_adding_unassigned_order_line_preserves_other_shipment_shipping_fee(clie
     changed = client.patch(f"/api/orders/{created['order_id']}", json=changed_assigned_line)
     assert changed.status_code == 200, changed.text
     assert changed.json()["summary"]["shipment_fee"] == "0.00"
+
+
+def _prepare_isolated_seed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest, orders: dict) -> None:
+    """为种子校验用例创建独立项目数据目录和空数据库。"""
+    source_data = Path(__file__).resolve().parents[2] / "data"
+    seed_root = tmp_path / "seed-project"
+    data_dir = seed_root / "data"
+    data_dir.mkdir(parents=True)
+    shutil.copy(source_data / "products.json", data_dir / "products.json")
+    (data_dir / "orders.json").write_text(json.dumps(orders), encoding="utf-8")
+    monkeypatch.setattr(database, "PROJECT_ROOT", seed_root)
+    database.configure_database(f"sqlite:///{tmp_path / 'seed-validation.db'}")
+    # 还原 client fixture 为当前用例建立的数据库，避免影响不使用 client fixture 的后续测试。
+    request.addfinalizer(lambda: database.configure_database(f"sqlite:///{tmp_path / 'test-oms.db'}"))
+
+
+def test_seed_validation_accepts_order_lines_without_a_shipment(tmp_path, monkeypatch, request, client):
+    order = {
+        "order_id": "PO-SEED-UNASSIGNED",
+        "order_date": "2026-11-08",
+        "status": "draft",
+        "company_name": "Example Health",
+        "customer": {"name": "Seed Customer", "phone": "0400000000", "email": "seed@example.com"},
+        "shipping_address": {"street": "1 Main Street", "suburb": "Ryde", "state": "NSW", "postcode": "2112", "country": "Australia"},
+        "line_items": [
+            {"sku": "AURPUR10", "quantity": 1, "rrp_incl_gst": "110.00", "gst_rate_percent": "10.00"},
+            {"sku": "HALGEO15", "quantity": 1, "rrp_incl_gst": "105.00", "gst_rate_percent": "5.00"},
+        ],
+        "shipments": [],
+    }
+    _prepare_isolated_seed(tmp_path, monkeypatch, request, {"currency": "AUD", "orders": [order]})
+
+    database.init_db()
+
+    with database.SessionLocal() as session:
+        seeded_order = session.scalar(select(OrderRow).where(OrderRow.order_no == "PO-SEED-UNASSIGNED"))
+        assert seeded_order is not None
+        assert {line.rrp_incl_gst_cents for line in seeded_order.lines} == {11000, 10500}
+        assert {line.gst_rate_basis_points for line in seeded_order.lines} == {1000, 500}
+        assert seeded_order.subtotal_ex_gst_cents == 20000
+        assert seeded_order.gst_cents == 1500
+        assert seeded_order.total_cents == 21500
+        assert seeded_order.shipments == []
+
+
+def test_seed_validation_rejects_invalid_quantity_before_importing_products(tmp_path, monkeypatch, request, client):
+    order = {
+        "order_id": "PO-SEED-INVALID",
+        "order_date": "2026-11-08",
+        "status": "draft",
+        "company_name": "Example Health",
+        "customer": {"name": "Seed Customer", "phone": "0400000000", "email": "seed@example.com"},
+        "shipping_address": {"street": "1 Main Street", "suburb": "Ryde", "state": "NSW", "postcode": "2112", "country": "Australia"},
+        "line_items": [{"sku": "AURPUR10", "quantity": 0}],
+        "shipments": [],
+    }
+    _prepare_isolated_seed(tmp_path, monkeypatch, request, {"currency": "AUD", "orders": [order]})
+
+    with pytest.raises(ValueError, match=r"Invalid seed data in orders\.json: .*line_items\.0\.quantity"):
+        database.init_db()
+
+    with database.SessionLocal() as session:
+        assert session.scalars(select(ProductRow)).all() == []
+        assert session.scalars(select(OrderRow)).all() == []

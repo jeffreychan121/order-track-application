@@ -17,4 +17,17 @@ export default defineConfig({
     port: 4176,
     strictPort: true,
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('/node_modules/')) return;
+          if (id.includes('/@mui/icons-material/')) return 'mui-icons';
+          if (id.includes('/@mui/') || id.includes('/@emotion/')) return 'mui-vendor';
+          if (id.includes('/react-dom/') || id.includes('/react/') || id.includes('/scheduler/')) return 'react-vendor';
+          if (id.includes('/react-router')) return 'router-vendor';
+        },
+      },
+    },
+  },
 });

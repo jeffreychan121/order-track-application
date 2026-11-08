@@ -6,10 +6,12 @@ from .database import CarrierRow, ShipmentRow
 
 
 class CarrierError(ValueError):
+    """表示承运商资料违反可用性或历史关联约束。"""
     pass
 
 
 def _dto(row: CarrierRow, used: bool | None = None) -> dict:
+    """将数据库行转成 API 格式，并统一补齐可编辑页面所需的 used 标志。"""
     return {
         "id": row.id, "code": row.code, "name": row.name,
         "description": row.description or "", "integration_type": row.integration_type,
@@ -20,6 +22,7 @@ def _dto(row: CarrierRow, used: bool | None = None) -> dict:
 
 
 def list_carriers(search: str | None = None, active_only: bool = False) -> list[dict]:
+    """按名称和代码检索承运商，并为列表批量标记历史 Shipment 引用。"""
     with database.SessionLocal() as session:
         stmt = select(CarrierRow).order_by(CarrierRow.name, CarrierRow.id)
         if active_only:
@@ -33,6 +36,7 @@ def list_carriers(search: str | None = None, active_only: bool = False) -> list[
 
 
 def get_carrier(carrier_id: int) -> dict | None:
+    """读取承运商详情；不存在时返回 None，具体 HTTP 映射留给路由层。"""
     with database.SessionLocal() as session:
         row = session.get(CarrierRow, carrier_id)
         if not row:
@@ -42,6 +46,7 @@ def get_carrier(carrier_id: int) -> dict | None:
 
 
 def create_carrier(payload: dict) -> dict:
+    """规范化代码后创建新记录；自定义承运商默认没有报价或追踪适配器。"""
     code = str(payload.get("code", "")).strip().upper()
     name = str(payload.get("name", "")).strip()
     if not code or not name:
@@ -61,6 +66,7 @@ def create_carrier(payload: dict) -> dict:
 
 
 def update_carrier(carrier_id: int, changes: dict) -> dict:
+    """局部更新承运商；历史记录引用后锁定代码，但名称和启用状态仍可维护。"""
     with database.SessionLocal.begin() as session:
         row = session.get(CarrierRow, carrier_id)
         if not row:
@@ -90,6 +96,7 @@ def update_carrier(carrier_id: int, changes: dict) -> dict:
 
 
 def delete_carrier(carrier_id: int) -> None:
+    """只删除未被 Shipment 使用的承运商，避免破坏历史物流数据。"""
     with database.SessionLocal.begin() as session:
         row = session.get(CarrierRow, carrier_id)
         if not row:

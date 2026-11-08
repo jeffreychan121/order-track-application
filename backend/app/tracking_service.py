@@ -20,6 +20,7 @@ CACHE_SECONDS = 60
 
 @dataclass(frozen=True)
 class ArticleTrackingResult:
+    """表示单个包裹/article 的状态和时间线，不与整票事件合并。"""
     article_id: str | None
     product_type: str | None
     raw_status: str | None
@@ -30,6 +31,7 @@ class ArticleTrackingResult:
 
 @dataclass(frozen=True)
 class TrackingResult:
+    """追踪适配器的统一返回值，供 API 层屏蔽上游响应格式差异。"""
     status: str
     raw_status: str | None = None
     last_updated: str | None = None
@@ -40,10 +42,12 @@ class TrackingResult:
 
     @property
     def article_count(self) -> int:
+        """返回成功解析出的包裹数量；上游查询失败时通常为零。"""
         return len(self.articles)
 
     @property
     def delivered_article_count(self) -> int:
+        """按已标准化状态统计已投递包裹数。"""
         return sum(article.status == "delivered" for article in self.articles)
 
 
@@ -53,6 +57,7 @@ _request_times: deque[float] = deque()
 
 
 def _unavailable(message: str, error_code: str | None = None) -> TrackingResult:
+    """构造可显示的不可用结果，避免上游故障变成订单页异常。"""
     return TrackingResult(
         status="unavailable",
         raw_status=None,
@@ -62,6 +67,7 @@ def _unavailable(message: str, error_code: str | None = None) -> TrackingResult:
 
 
 def _sanitize_message(value: object) -> str:
+    """压平上游文本、遮盖可能夹带的认证字段并限制其展示长度。"""
     message = " ".join(str(value).split())
     message = re.sub(
         r"(?i)(authorization|password|api[-_ ]?key|account[-_ ]?number)\s*[:=]\s*[^,;\s]+",
@@ -72,6 +78,7 @@ def _sanitize_message(value: object) -> str:
 
 
 def _api_error_message(payload: object) -> str | None:
+    """从上游错误包提取有限条诊断信息，并通过安全文本过滤器处理。"""
     if not isinstance(payload, dict):
         return None
     errors = payload.get("errors")
@@ -100,6 +107,7 @@ def _events_for(result: dict) -> list[dict]:
 
 
 def _event_datetime(event: dict) -> datetime | None:
+    """解析 ISO 时间；无时区的上游时间按 UTC 解释，非法值返回 None。"""
     value = event.get("date")
     if not isinstance(value, str) or not value.strip():
         return None
@@ -111,6 +119,7 @@ def _event_datetime(event: dict) -> datetime | None:
 
 
 def _normalized_tracking_events(events: list[dict]) -> list[dict[str, str | None]]:
+    """删除无有效时间的事件、按时间与内容去重，并按最新时间倒序排列。"""
     normalized: dict[tuple[str, str, str], tuple[datetime, dict[str, str | None]]] = {}
     for event in events:
         date = event.get("date")
@@ -132,6 +141,7 @@ def _normalized_tracking_events(events: list[dict]) -> list[dict[str, str | None
 
 
 def _map_status(raw_status: str | None) -> str:
+    """将承运商多变的状态文案映射到界面共用的有限状态集合。"""
     if not isinstance(raw_status, str) or not raw_status.strip():
         return "unknown"
     value = raw_status.casefold().strip()
@@ -147,6 +157,7 @@ def _map_status(raw_status: str | None) -> str:
 
 
 def _derived_overall_status(articles: list[ArticleTrackingResult]) -> str:
+    """当整票没有状态时，按各 article 的投递比例推导整票状态。"""
     if not articles:
         return "unknown"
     delivered = sum(article.status == "delivered" for article in articles)
@@ -161,6 +172,7 @@ def _derived_overall_status(articles: list[ArticleTrackingResult]) -> str:
 
 
 def _article_tracking_result(value: object) -> ArticleTrackingResult | None:
+    """解析一条包裹结果；缺少状态时使用最新事件文案作为推导依据。"""
     if not isinstance(value, dict):
         return None
     raw_status = value.get("status") if isinstance(value.get("status"), str) else None
@@ -189,6 +201,7 @@ def _safe_event_summaries(result: dict) -> list[dict[str, str | None]]:
 
 
 def _parse_tracking_result(payload: object, tracking_number: str) -> TrackingResult:
+    """解析上游 envelope、匹配请求运单号，并分别整理整票和包裹时间线。"""
     if not isinstance(payload, dict):
         return _unavailable("Australia Post returned an unexpected response format.", "SERVICE_UNAVAILABLE")
 
@@ -256,6 +269,7 @@ def _parse_tracking_result(payload: object, tracking_number: str) -> TrackingRes
 def _get_tracking_result(
     carrier: str, tracking_number: str, refresh: bool = False
 ) -> TrackingResult:
+    """执行单票追踪；TNT 不转发，其他支持的承运商共享缓存和频率限制。"""
     query_started = time.monotonic()
     log_api_event(
         "tracking_query_started",

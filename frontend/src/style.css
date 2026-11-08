@@ -39,6 +39,7 @@ a:hover { color: var(--purple); text-decoration: underline; }
 .refresh-button:disabled { cursor: wait; opacity: .6; }
 
 .workspace { flex: 1 1 0; min-width: 0; width: auto; max-width: 1600px; margin: 0 auto; padding: 24px; }
+.page-loading { min-height: 42vh; display: flex; align-items: center; justify-content: center; gap: 10px; color: #777780; }
 .page-heading { display: flex; align-items: flex-end; justify-content: space-between; min-height: 55px; margin-bottom: 16px; }
 .page-heading h1 { margin: 0; color: #777780; font-size: 14px; font-weight: 550; letter-spacing: 0; }
 
@@ -86,7 +87,7 @@ a:hover { color: var(--purple); text-decoration: underline; }
 .order-lines-table tbody tr:last-child td { border-bottom: 0; }
 .product-column { width: 48%; }
 .number-column { width: 13%; text-align: right !important; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.order-lines-table th:nth-child(2), .order-lines-table td:nth-child(2) { text-align: center !important; }
+.order-lines-table:not(.MuiTable-root) th:nth-child(2), .order-lines-table:not(.MuiTable-root) td:nth-child(2) { text-align: center !important; }
 .subtotal-cell { color: #40384b !important; font-weight: 650; }
 .line-product { display: flex; align-items: center; min-width: 0; gap: 10px; }
 .product-placeholder { display: block; flex: 0 0 48px; width: 48px; height: 48px; border: 1px solid #e2e2e5; border-radius: 4px; object-fit: cover; background: #f8f8f9; }
@@ -302,8 +303,18 @@ a:hover { color: var(--purple); text-decoration: underline; }
 .read-only-field { display: grid; min-width: 0; min-height: 44px; align-content: center; gap: 3px; padding: 3px 2px; }
 .read-only-field-label { color: #929099; font-size: 10px; line-height: 1.2; }
 .read-only-field-value { color: #45444c; font-size: 13px; font-weight: 500; line-height: 1.4; overflow-wrap: anywhere; }
-.order-form-toolbar { padding: 6px 0 6px 12px; border: 1px solid var(--line); border-bottom: 0; border-radius: 4px 4px 0 0; background: #fff; }
-.order-form-toolbar + .order-sheet { border-radius: 0 0 4px 4px; }
+.order-form-toolbar.MuiPaper-root { min-width: 0; margin: 0 !important; padding: 6px 10px; border-radius: 4px 4px 0 0; }
+.order-form-toolbar-layout { min-width: 0; flex-wrap: nowrap; }
+.order-toolbar-actions { min-width: 0; flex: 0 1 auto; flex-wrap: wrap; }
+.order-toolbar-status { min-width: 0; max-width: 100%; margin-left: auto; }
+.order-form-toolbar .statusbar-wrap { box-sizing: border-box; height: 42px; min-height: 42px; padding: 0 8px; border-bottom: 1px solid var(--line); border-radius: 4px; gap: 5px; justify-content: flex-end; }
+.order-form-toolbar .status-step { gap: 4px; padding-right: 3px; font-size: 11px; }
+.order-form-toolbar .status-step:not(:last-child)::after { width: 13px; margin: 0 4px; }
+.order-form-toolbar .status-step-marker { width: 17px; height: 17px; font-size: 9px; }
+.order-form-toolbar .status-action.MuiButton-root { min-width: 0; height: 42px; min-height: 42px; padding: 3px 10px; border: 1px solid #ded9e6; font-size: 11px; white-space: nowrap; }
+.order-form-toolbar .status-action-primary.MuiButton-root { border-color: var(--purple); color: #fff; background: var(--purple); }
+.order-form-toolbar .status-action-primary.MuiButton-root:hover { background: var(--purple-dark); }
+.order-form-toolbar .status-action-secondary.MuiButton-root { border-color: #ded9e6; color: var(--purple-dark); background: #fff; }
 .shipment-card-info { display: grid; min-width: 0; gap: 12px; }
 .shipment-tracking-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .shipment-meta-item { display: grid; min-width: 0; align-content: start; gap: 3px; }
@@ -324,13 +335,6 @@ a:hover { color: var(--purple); text-decoration: underline; }
 .shipment-drawer-lines { display: grid; gap: 5px; padding-top: 11px; border-top: 1px solid var(--line-light); }
 .shipping-location-grid { align-items: stretch; }
 .shipping-location-grid > .MuiPaper-root { overflow: visible; }
-.order-form-toolbar { width: 100%; min-height: 43px; flex-wrap: wrap; }
-.order-form-toolbar > .MuiBox-root, .order-form-toolbar > .MuiStack-root { min-width: 0; }
-.order-toolbar-actions { flex: 0 1 auto; flex-wrap: wrap; }
-.order-toolbar-status { display: flex; flex: 0 1 auto; justify-content: flex-end; max-width: 100%; margin-left: auto !important; }
-.order-form-toolbar > .order-toolbar-actions .MuiButton-root { height: 42px; min-height: 42px; }
-.order-form-toolbar .MuiTypography-h4 { margin-top: 3px; color: #3a3940; font-size: 22px; font-weight: 700; overflow-wrap: anywhere; }
-.order-form-toolbar .MuiStack-root { font-size: 12px; }
 .order-record-heading { padding: 14px 20px 0; }
 .order-record-heading .MuiTypography-h4 { color: #3a3940; font-size: 25px; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
 .order-sheet .order-field-groups .MuiOutlinedInput-root { height: 39px; min-height: 39px; }
@@ -351,7 +355,8 @@ a:hover { color: var(--purple); text-decoration: underline; }
 .order-sheet .order-tabs .Mui-selected { color: var(--purple-dark); font-weight: 700; background: #fff; }
 .order-sheet .order-tabs .MuiTabs-indicator { height: 2px; background: var(--purple); }
 .order-sheet .table-scroll { display: block; width: 100%; overflow-x: auto; }
-.order-sheet .order-lines-table { min-width: 1120px; border-collapse: collapse; table-layout: fixed; }
+.order-sheet .order-lines-table { min-width: 1450px; border-collapse: collapse; table-layout: fixed; }
+.order-sheet .order-lines-table.is-tracking-visible { min-width: 1600px; }
 .order-sheet .order-lines-table .MuiTableCell-root { padding: 8px 10px; border-bottom: 1px solid var(--line-light); color: #4a4951; font-size: 13px; vertical-align: middle; }
 .order-sheet .order-lines-table .MuiTableCell-head { color: #777780; background: #f7f7f8; font-size: 11px; font-weight: 650; white-space: nowrap; }
 .order-sheet .order-lines-table .MuiTableRow-root { height: 64px; }
@@ -364,14 +369,6 @@ a:hover { color: var(--purple); text-decoration: underline; }
 .order-sheet .MuiChip-root { height: 23px; border-radius: 3px; font-size: 11px; }
 .order-sheet .MuiAlert-root { border-radius: 3px; font-size: 12px; }
 .order-sheet .MuiAlert-message { padding: 3px 0; }
-.order-form-toolbar .statusbar-wrap { box-sizing: border-box; height: 42px; min-height: 42px; padding: 0 8px; border-bottom: 1px solid var(--line); border-radius: 4px; gap: 5px; justify-content: flex-end; }
-.order-form-toolbar .status-step { gap: 4px; padding-right: 3px; font-size: 11px; }
-.order-form-toolbar .status-step:not(:last-child)::after { width: 13px; margin: 0 4px; }
-.order-form-toolbar .status-step-marker { width: 17px; height: 17px; font-size: 9px; }
-.order-form-toolbar .status-action.MuiButton-root { min-width: 0; height: 42px; min-height: 42px; padding: 3px 10px; border: 1px solid #ded9e6; color: var(--purple-dark); background: #fff; font-size: 11px; white-space: nowrap; }
-.order-form-toolbar .status-action-next.MuiButton-root { border-color: var(--purple); color: #fff; background: var(--purple); }
-.order-form-toolbar .status-action-next.MuiButton-root:hover { background: var(--purple-dark); }
-.order-form-toolbar .status-revert-action.MuiButton-root { color: #6f5962; }
 .tracking-drawer-paper.MuiDrawer-paper { display: flex; flex-direction: column; border-left: 1px solid var(--line); background: #f7f6f8; }
 .tracking-drawer-header { position: sticky; z-index: 1; top: 0; flex: 0 0 auto; padding: 13px 88px 13px 18px; border-bottom: 1px solid var(--line); background: #fff; }
 .tracking-drawer-header .tracking-close-button { position: absolute; top: 6px; right: 10px; }
@@ -423,6 +420,7 @@ a:hover { color: var(--purple); text-decoration: underline; }
 .table-scroll .MuiTableCell-body { color: #4a4951; font-size: 12px; }
 
 @media (max-width: 900px) {
+  .order-form-toolbar-layout { flex-wrap: wrap; }
   .order-form-toolbar .statusbar-wrap { flex-wrap: wrap; }
   .order-toolbar-status { margin-left: auto !important; align-self: center; }
 }
@@ -434,18 +432,19 @@ a:hover { color: var(--purple); text-decoration: underline; }
   .orders-heading .page-eyebrow { font-size: 9px; }
   .orders-heading h1 { font-size: 20px; }
   .orders-heading p { max-width: 220px; }
-  .order-form-toolbar { align-items: center !important; gap: 8px !important; }
-  .order-form-toolbar { justify-content: space-between !important; gap: 6px !important; }
-  .order-toolbar-actions { flex-wrap: wrap; }
-  .order-toolbar-status { margin-left: auto; }
+  .order-form-toolbar.MuiPaper-root { padding: 8px; }
+  .order-form-toolbar-layout { align-items: stretch !important; flex-direction: column !important; gap: 8px !important; }
+  .order-toolbar-actions { width: 100%; flex-wrap: wrap; }
+  .order-toolbar-status { width: 100%; margin-left: 0 !important; overflow-x: auto; }
+  .order-form-toolbar .statusbar-wrap { width: max-content; min-width: 100%; justify-content: flex-start; flex-wrap: nowrap; }
+  .order-form-toolbar .statusbar { width: max-content; }
+  .order-form-toolbar .status-step { gap: 3px; padding-right: 2px; font-size: 9px; }
+  .order-form-toolbar .status-step:not(:last-child)::after { width: 8px; margin: 0 3px; }
+  .order-form-toolbar .status-step-marker { width: 15px; height: 15px; font-size: 8px; }
   .shipment-card.MuiPaper-root { gap: 9px; padding: 11px; }
   .shipment-fields { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .shipment-card-status { align-items: flex-start; text-align: left; }
   .shipment-card-actions { flex: 1 1 100%; justify-content: flex-start; margin-left: 0; }
-  .order-form-toolbar .statusbar-wrap { width: auto; justify-content: flex-end; flex-wrap: wrap; }
-  .order-form-toolbar .status-step { gap: 3px; padding-right: 2px; font-size: 9px; }
-  .order-form-toolbar .status-step:not(:last-child)::after { width: 8px; margin: 0 3px; }
-  .order-form-toolbar .status-step-marker { width: 15px; height: 15px; font-size: 8px; }
   .order-record-heading { padding: 12px 13px 0; }
   .order-record-heading .MuiTypography-h4 { font-size: 22px; }
   .order-sheet .order-field-groups .MuiOutlinedInput-root { height: 36px; min-height: 36px; }
@@ -502,4 +501,85 @@ a:hover { color: var(--purple); text-decoration: underline; }
 .shipment-card-status .MuiChip-root.MuiChip-filled.MuiChip-colorSuccess { font-weight: 650; }
 @media (max-width: 640px) {
   .shipment-card-status { align-items: flex-end; text-align: right; }
+}
+
+/* Responsive layout guardrails shared by Orders, Products, Carriers and API pages. */
+html, body, #root { width: 100%; min-width: 320px; }
+body { overflow-x: hidden; }
+#root, .erp-app, .workspace, .api-testing-page-content, .tab-panel, .order-sheet, .tracking-result { min-width: 0; }
+.page-heading { min-width: 0; gap: 16px; }
+.page-heading > div { min-width: 0; flex: 1 1 auto; }
+.page-heading p { max-width: 72ch; line-height: 1.45; overflow-wrap: anywhere; }
+.field-group, .field-groups > *, .list-toolbar > div:first-child { min-width: 0; }
+.table-scroll, .MuiTableContainer-root { max-width: 100%; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
+.order-form-toolbar-layout { min-height: 48px; gap: 8px; }
+.order-form-toolbar.MuiPaper-root { border-bottom: 1px solid var(--line); border-radius: 4px 4px 0 0; }
+.order-sheet.MuiPaper-root { border-top: 0; border-top-left-radius: 0; border-top-right-radius: 0; }
+.order-meta-grid { display: grid; min-width: 0; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; gap: 10px 14px; margin-bottom: 12px; }
+.order-meta-field { min-width: 0; }
+.order-meta-field > .MuiTextField-root { width: 100%; }
+.order-address-grid > * { min-width: 0; }
+.tracking-query-form > .MuiFormControl-root, .tracking-query-form > .MuiTextField-root { min-width: 0; }
+.tracking-timeline-event .MuiTypography-body2 { overflow-wrap: anywhere; }
+.quote-rate-actions { min-width: 0; }
+.planner-dialog-actions { min-width: 0; }
+
+@media (max-width: 1100px) {
+  .field-groups { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .order-form-toolbar-layout { flex-wrap: wrap; }
+  .order-toolbar-status { margin-left: auto !important; }
+  .tracking-query-form { flex-wrap: wrap !important; }
+  .tracking-query-form > .MuiFormControl-root { flex: 1 1 210px; min-width: min(230px, 100%) !important; }
+  .tracking-query-form > .MuiTextField-root { flex: 1 1 250px; min-width: min(220px, 100%); }
+  .tracking-query-form > .MuiButton-root { flex: 0 0 auto; }
+}
+
+@media (max-width: 640px) {
+  .workspace { padding: 14px 10px 24px; }
+  .page-heading { align-items: stretch; flex-direction: column; gap: 5px; }
+  .page-heading p { max-width: none; }
+  .order-form-toolbar.MuiPaper-root { padding: 8px; }
+  .order-form-toolbar-layout { align-items: stretch !important; flex-direction: column !important; gap: 8px !important; }
+  .order-toolbar-actions { width: 100%; }
+  .order-toolbar-status { width: 100%; margin-left: 0 !important; overflow-x: auto; }
+  .order-form-toolbar .statusbar-wrap { width: max-content; min-width: 100%; justify-content: flex-start; flex-wrap: nowrap; }
+  .order-form-toolbar .statusbar { width: max-content; }
+  .order-meta-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .list-toolbar { align-items: flex-start; flex-wrap: wrap; gap: 9px; }
+  .list-toolbar > .MuiStack-root { max-width: 100%; flex-wrap: wrap; margin-left: auto; }
+  .order-sheet .table-scroll { display: none; }
+  .mobile-order-lines { display: grid; border-top: 1px solid var(--line-light); }
+  .mobile-line { display: grid; min-width: 0; gap: 10px; }
+  .mobile-line-values { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mobile-line-values dd { min-width: 0; overflow-wrap: anywhere; }
+  .mobile-line-input.MuiTextField-root { width: 100%; max-width: 150px; }
+  .mobile-line-remove.MuiButton-root { justify-self: start; margin-left: 54px; }
+  .orders-create-button.MuiButton-root { width: 100%; justify-self: stretch; }
+  .shipment-card-footer { grid-template-columns: minmax(0, 1fr); }
+  .shipment-card-actions { width: 100%; justify-content: flex-start; }
+  .tracking-query-form { align-items: stretch !important; flex-direction: column !important; }
+  .tracking-query-form > * { width: 100%; }
+  .tracking-result-heading { align-items: flex-start !important; flex-wrap: wrap; gap: 8px; }
+  .tracking-result-heading .MuiButton-root { margin-left: 0; }
+  .tracking-article-heading { grid-template-columns: minmax(0, 1fr); }
+  .tracking-article-heading > .MuiChip-root { max-width: 100%; justify-self: start; }
+  .quote-rate-actions { width: 100%; }
+  .quote-rate-actions .MuiButton-root { width: 100%; }
+  .planner-dialog-actions { align-items: stretch; flex-wrap: wrap; }
+  .planner-dialog-actions > .MuiButton-root { width: 100%; margin-left: 0; }
+  .planner-action-buttons { width: 100%; flex-wrap: wrap; }
+  .planner-action-buttons > span { display: flex; flex: 1 1 140px; }
+  .planner-action-buttons > span .MuiButton-root, .planner-action-buttons > .MuiButton-root { width: 100%; flex: 1 1 120px; }
+}
+
+@media (max-width: 420px) {
+  .workspace { padding-right: 8px; padding-left: 8px; }
+  .order-record-heading .MuiTypography-h4 { font-size: 20px; }
+  .order-meta-grid { gap: 8px 6px; }
+  .mobile-line-values { margin-left: 0; }
+  .mobile-line-remove.MuiButton-root { margin-left: 0; }
+  .order-meta-field .MuiInputBase-input { font-size: 12px; }
+  .shipment-drawer-metadata { grid-template-columns: minmax(0, 1fr); }
+  .shipment-drawer-fee { min-width: 0; padding: 9px 0 0; border-top: 1px solid var(--line); border-left: 0; }
+  .planner-action-buttons { gap: 4px; }
 }

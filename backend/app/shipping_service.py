@@ -23,7 +23,10 @@ _account_products_cache_ttl = 15 * 60
 
 
 class QuoteError(Exception):
+    """承运商报价错误携带稳定错误码，供 API 和前端作分类处理。"""
+
     def __init__(self, code: str, message: str):
+        """保存机器可判断的错误码，同时保留面向用户的安全说明。"""
         super().__init__(message)
         self.code = code
 
@@ -101,6 +104,7 @@ def _account_profiles() -> list[dict]:
 
 
 def _account_number_masked(account_number: str) -> str:
+    """只暴露账号末四位供用户辨认，绝不把账号原值返回浏览器。"""
     if not account_number:
         return "Not configured"
     return f"••••{account_number[-4:]}" if len(account_number) > 4 else "••••"
@@ -330,6 +334,7 @@ def get_pricing_account_products(profile_id: str | None = None, *, refresh: bool
 
 
 def get_rates(data: dict) -> list[dict]:
+    """将调用方地址和包裹转成上游价格请求，校验响应并缓存可应用的报价。"""
     # 报价账号决定上游可用服务；请求地址和包裹数据保持调用方提交的值。
     request_started = time.monotonic()
     carrier_name = str(data.get("carrier") or "Australia Post")
@@ -473,6 +478,7 @@ def get_rates(data: dict) -> list[dict]:
 
 
 def cached_quote(quote_id: str, *, order_no: str | None = None, shipment_id: int | None = None) -> dict:
+    """读取 15 分钟内有效的报价，并按需核对其订单和 Shipment 归属。"""
     with _lock:
         entry = _quotes.get(quote_id)
     if not entry or time.monotonic() - entry[0] > 900:

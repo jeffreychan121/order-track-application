@@ -23,7 +23,7 @@ def test_rtt_xml_has_legacy_domestic_request_structure(monkeypatch):
     root = tnt_smoke.SafeET.fromstring(xml)
     ns = {"t": "http://www.tntexpress.com.au"}
     enquiry = root.find("t:ratedTransitTimeEnquiry", ns)
-    assert enquiry.findtext("t:cutOffTimeEnquiry/t:collectionAddress/t:postCode", namespaces=ns) == "2111"
+    assert enquiry.findtext("t:cutOffTimeEnquiry/t:collectionAddress/t:postCode", namespaces=ns) == "2112"
     assert enquiry.findtext("t:cutOffTimeEnquiry/t:deliveryAddress/t:postCode", namespaces=ns) == "3065"
     assert enquiry.findtext("t:cutOffTimeEnquiry/t:shippingDate", namespaces=ns) == "2026-11-09"
     packages = enquiry.find("t:cutOffTimeEnquiry/t:packageLines", ns)

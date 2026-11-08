@@ -12,6 +12,7 @@ from .tracking_service import get_tracking_result
 
 
 def _event_predates_order(events: list[dict[str, str | None]], order_date: date) -> bool:
+    """检测上游追踪事件是否早于订单日期，用于标记可能的测试数据错配。"""
     for event in events:
         value = event.get("date")
         if not value:
@@ -26,6 +27,7 @@ def _event_predates_order(events: list[dict[str, str | None]], order_date: date)
 
 
 def get_order_tracking(order_no: str, refresh: bool = False) -> list[ShipmentTrackingResponse] | None:
+    """先复制订单的 Shipment 查询条件，再逐票调用承运商，避免会话跨网络请求保持打开。"""
     with database.SessionLocal() as session:
         order = session.scalar(select(OrderRow).where(OrderRow.order_no == order_no).options(selectinload(OrderRow.shipments)))
         if order is None:

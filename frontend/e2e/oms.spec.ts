@@ -4,7 +4,7 @@ const shipmentA = { id: 101, tracking_group: 'Shipment A', carrier: 'Australia P
 const shipmentB = { id: 102, tracking_group: 'Shipment B', carrier: 'Australia Post', carrier_id: 1, tracking_number: 'BB002', shipping_fee: '12.00', shipping_quote_status: 'quoted', order_line_ids: [12], related_skus: ['SKU-B'], packages: [{ weight_gross_g: 2300, length_mm: 200, width_mm: 150, height_mm: 120 }], origin: null, destination: null };
 const lineA = { id: 11, sku: 'SKU-A', product_name: 'Alpha', description: '', quantity: 2, tracking_group: 'Shipment A', rrp_incl_gst: '22.00', gst_rate_percent: '10.00', ex_gst_unit_price: '20.00', line_subtotal_ex_gst: '40.00', currency: 'AUD', product_weight_g: 250 };
 const lineB = { id: 12, sku: 'SKU-B', product_name: 'Beta', description: '', quantity: 3, tracking_group: 'Shipment B', rrp_incl_gst: '33.00', gst_rate_percent: '10.00', ex_gst_unit_price: '30.00', line_subtotal_ex_gst: '90.00', currency: 'AUD', product_weight_g: 500 };
-const order = { id: 7, order_id: 'PO-20251130-00072', order_date: '2025-11-30', status: 'draft', company_name: 'V22 Dispensary', customer: { name: 'Jason Hu', phone: '0400000000', email: 'jason@example.com' }, shipping_address: { street: '1 Test Rd', suburb: 'Ryde', state: 'NSW', postcode: '2111', country: 'Australia' }, line_items: [lineA, lineB], shipments: [shipmentA, shipmentB], summary: { currency: 'AUD', subtotal_ex_gst: '130.00', gst_rate: '10.00%', gst_amount: '13.00', shipment_fee: '12.00', total: '155.00' } };
+const order = { id: 7, order_id: 'PO-20251130-00072', order_date: '2025-11-30', status: 'draft', company_name: 'V22 Dispensary', customer: { name: 'Jason Hu', phone: '0400000000', email: 'jason@example.com' }, shipping_address: { street: '1 Test Rd', suburb: 'Ryde', state: 'NSW', postcode: '2112', country: 'Australia' }, address_line2: 'Unit 4', line_items: [lineA, lineB], shipments: [shipmentA, shipmentB], summary: { currency: 'AUD', subtotal_ex_gst: '130.00', gst_rate: '10.00%', gst_amount: '13.00', shipment_fee: '12.00', total: '155.00' } };
 const transitOrder = { ...order, id: 8, order_id: 'PO-20251203-00046', order_date: '2025-12-03', status: 'in_transit', company_name: 'Cann Life Dispensary', customer: { name: 'Bella Dari', phone: '0411547288', email: 'bella@example.com' }, summary: { currency: 'AUD', subtotal_ex_gst: '1504.55', gst_rate: '10.00%', gst_amount: '150.45', shipment_fee: '0.00', total: '1655.00' } };
 const carriers = [{ id: 1, code: 'AP', name: 'Australia Post', description: '', is_active: true, integration_type: 'AUSTRALIA_POST', rate_capability: 'SUPPORTED', tracking_capability: 'SUPPORTED', used: true }];
 const pricingAccounts = [{ id: 'test-eparcel', label: 'Test eParcel Account', account_number_masked: '••••0001', environment: 'test', enabled: true, pricing_enabled: true, default_for_pricing: true, configured: true }];
@@ -18,7 +18,7 @@ async function mockApi(page: Page) {
     if (url.pathname === '/api/shipping/accounts' && route.request().method() === 'GET') return route.fulfill({ json: pricingAccounts });
     if (/^\/api\/shipping\/accounts\/[^/]+\/products$/.test(url.pathname)) return route.fulfill({ json: { account: { id: 'test-eparcel', label: 'Test eParcel Account', account_number_masked: '••••0001', environment: 'test', locations: [] }, products: [] } });
     if (url.pathname === '/api/orders' && route.request().method() === 'GET') return route.fulfill({ json: [order, transitOrder] });
-    if (url.pathname === '/api/products') return route.fulfill({ json: [] });
+    if (url.pathname === '/api/products') return route.fulfill({ json: order.line_items.map(line => ({ sku: line.sku, name: line.product_name, description: line.description, rrp_incl_gst: line.rrp_incl_gst, weight_g: line.product_weight_g })) });
     if (url.pathname === `/api/orders/${order.order_id}/status` && route.request().method() === 'PATCH') { currentOrder = { ...currentOrder, status: route.request().postDataJSON().status }; return route.fulfill({ json: currentOrder }); }
     if (url.pathname === `/api/orders/${order.order_id}`) return route.fulfill({ json: currentOrder });
     if (url.pathname === '/api/shipments/101' && route.request().method() === 'PATCH') { currentOrder = { ...currentOrder, shipments: currentOrder.shipments.map(item => item.id === 101 ? { ...item, tracking_number: route.request().postDataJSON().tracking_number } : item) }; return route.fulfill({ json: currentOrder }); }
@@ -48,7 +48,7 @@ test('new order lines stay unassigned instead of inheriting the first Shipment',
   await page.route('**/api/products', route => route.fulfill({ json: [{ sku: 'SKU-C', name: 'Gamma', description: '', rrp_incl_gst: '44.00', weight_g: 300 }] }));
 
   await page.goto(`/orders/${order.order_id}`);
-  await page.getByRole('button', { name: 'Edit' }).click();
+  await page.getByRole('button', { name: 'Edit', exact: true }).click();
   await page.getByRole('button', { name: 'Add Product' }).click();
   const productSearch = page.getByRole('combobox', { name: 'Search SKU or product' });
   await productSearch.fill('SKU-C');
@@ -61,18 +61,28 @@ test('new order lines stay unassigned instead of inheriting the first Shipment',
   expect(savedBody!.line_items.find(line => line.sku === 'SKU-C')?.tracking_group).toBeNull();
 });
 
-test('Order Lines hide Shipment assignment and keep table headers aligned with row cells', async ({ page }) => {
+test('Order Lines keep the product image and align the separated SKU and description columns', async ({ page }) => {
   await page.goto(`/orders/${order.order_id}`);
-  await page.getByRole('button', { name: 'Edit' }).click();
+  await page.getByRole('button', { name: 'Edit', exact: true }).click();
   const table = page.locator('.order-lines-table');
   await page.screenshot({ path: 'test-results/order-lines-alignment.png' });
   await expect(table.getByRole('columnheader', { name: 'Shipment', exact: true })).toHaveCount(0);
+  await expect(table.getByRole('columnheader', { name: 'Product', exact: true })).toBeVisible();
+  await expect(table.getByRole('columnheader', { name: 'SKU Code', exact: true })).toBeVisible();
+  await expect(table.getByRole('columnheader', { name: 'Description', exact: true })).toBeVisible();
+  await expect(table.getByRole('columnheader', { name: 'Assigned Tracking', exact: true })).toHaveCount(0);
   await expect(page.getByLabel('Shipment for SKU-A')).toHaveCount(0);
+  await expect(table.locator('thead th')).toHaveCount(10);
+  await page.getByRole('button', { name: 'Columns' }).click();
+  await page.getByRole('checkbox', { name: 'Assigned Tracking' }).check();
+  await expect(table.locator('thead th').nth(3)).toHaveText('Assigned Tracking');
   const headers = table.locator('thead th');
   const cells = table.locator('tbody tr').first().locator('td');
-  // 订单行新增 Assigned Tracking、GST 税率和含税总计列，断言同步覆盖整行。
-  await expect(headers).toHaveCount(9);
-  for (let index = 0; index < 9; index += 1) {
+  // SKU 和描述独立成列，产品图片与名称仍保留在 Product 列。
+  await expect(headers).toHaveCount(11);
+  await expect(cells.nth(0).locator('img')).toBeVisible();
+  await expect(cells.nth(0).getByText('Alpha')).toBeVisible();
+  for (let index = 0; index < 11; index += 1) {
     const header = await headers.nth(index).boundingBox();
     const cell = await cells.nth(index).boundingBox();
     expect(header && cell).toBeTruthy();
@@ -82,8 +92,8 @@ test('Order Lines hide Shipment assignment and keep table headers aligned with r
     const cellAlign = await cells.nth(index).evaluate(element => getComputedStyle(element).textAlign);
     expect(headerAlign).toBe(cellAlign);
   }
-  expect(await headers.nth(2).evaluate(element => getComputedStyle(element).textAlign)).toBe('center');
-  expect(await headers.nth(3).evaluate(element => getComputedStyle(element).textAlign)).toBe('right');
+  expect(await headers.nth(4).evaluate(element => getComputedStyle(element).textAlign)).toBe('center');
+  expect(await headers.nth(5).evaluate(element => getComputedStyle(element).textAlign)).toBe('right');
 });
 
 test('orders and historical order detail retain independent line totals', async ({ page }) => {
@@ -92,9 +102,25 @@ test('orders and historical order detail retain independent line totals', async 
   await expect(page.getByText('PO-20251203-00046')).toBeVisible();
   await page.getByText('PO-20251130-00072').click();
   await expect(page.getByText('SKU-A', { exact: true }).first()).toBeVisible();
-  await expect(page.getByText('A$40.00')).toBeVisible();
+  await expect(page.locator('.order-lines-table').getByText('A$40.00')).toBeVisible();
   await expect(page.getByText('GST', { exact: true })).toBeVisible();
   await page.screenshot({ path: 'test-results/assessment-order-detail.png', fullPage: true });
+});
+
+test('order edit preview rounds GST from the aggregated ex-GST subtotal', async ({ page }) => {
+  const roundingOrder = {
+    ...order,
+    line_items: [{ ...lineA, quantity: 1, tracking_group: '', rrp_incl_gst: '49.99', gst_rate_percent: '10.00', ex_gst_unit_price: '45.45', line_subtotal_ex_gst: '45.45' }],
+    shipments: [],
+  };
+  await page.route(`**/api/orders/${order.order_id}`, route => route.fulfill({ json: roundingOrder }));
+  await page.goto(`/orders/${order.order_id}`);
+  await page.getByRole('button', { name: 'Edit', exact: true }).click();
+
+  const summary = page.locator('.amount-summary');
+  await expect(summary.getByText('A$45.45')).toBeVisible();
+  await expect(summary.getByText('A$4.55')).toBeVisible();
+  await expect(summary.getByText('A$50.00')).toBeVisible();
 });
 
 test('orders search, filters, and create action align in one desktop toolbar row', async ({ page }) => {
@@ -138,6 +164,9 @@ test('API request logs include lifecycle and a correlatable request ID', async (
   expect(completed?.request_id).toBe(started?.request_id);
   expect(started?.method).toBe('GET');
   expect(requestIds).toContain(started?.request_id);
+  const responseSummary = completed?.response_params as Array<Record<string, unknown>> | undefined;
+  expect(Array.isArray(responseSummary)).toBe(true);
+  expect(responseSummary?.[0].customer).toBe('[REDACTED]');
 });
 
 test('confirmed orders allow saving Shipment tracking numbers and reverting to draft', async ({ page }) => {
@@ -253,19 +282,34 @@ test('order and Shipment layout stays within the requested viewport widths', asy
   }
 });
 
-test('order actions stay left and the status bar stays right at tablet width with matching height', async ({ page }) => {
+test('order actions and status progress remain visible without overlap at tablet width', async ({ page }) => {
   await page.setViewportSize({ width: 754, height: 853 });
   await page.goto(`/orders/${order.order_id}`);
   const toolbar = page.locator('.order-form-toolbar');
-  const action = page.getByRole('button', { name: 'Mark Confirmed' });
+  await expect(toolbar).toBeVisible();
+  await expect(page.locator('.order-meta-grid').getByText('Draft')).toBeVisible();
+  const action = page.getByRole('button', { name: 'Edit', exact: true });
+  const confirmAction = page.getByRole('button', { name: 'Mark Confirmed' });
   const status = page.getByLabel('Order status: Draft');
   const toolbarBox = await toolbar.boundingBox();
   const actionBox = await action.boundingBox();
+  const confirmActionBox = await confirmAction.boundingBox();
   const statusBox = await status.boundingBox();
-  expect(toolbarBox && actionBox && statusBox).toBeTruthy();
-  expect(statusBox!.x).toBeGreaterThan(actionBox!.x + actionBox!.width);
-  expect(Math.abs(statusBox!.x + statusBox!.width - (toolbarBox!.x + toolbarBox!.width))).toBeLessThanOrEqual(2);
-  expect(Math.abs(statusBox!.height - actionBox!.height)).toBeLessThanOrEqual(1);
+  expect(toolbarBox && actionBox && confirmActionBox && statusBox).toBeTruthy();
+  for (const box of [actionBox!, confirmActionBox!, statusBox!]) {
+    expect(box.x).toBeGreaterThanOrEqual(toolbarBox!.x);
+    expect(box.x + box.width).toBeLessThanOrEqual(toolbarBox!.x + toolbarBox!.width + 1);
+    expect(box.y).toBeGreaterThanOrEqual(toolbarBox!.y);
+    expect(box.y + box.height).toBeLessThanOrEqual(toolbarBox!.y + toolbarBox!.height + 1);
+  }
+  const actionBoxes = [actionBox!, confirmActionBox!];
+  for (const actionBox of actionBoxes) {
+    const overlapsStatus = actionBox.x < statusBox!.x + statusBox!.width
+      && actionBox.x + actionBox.width > statusBox!.x
+      && actionBox.y < statusBox!.y + statusBox!.height
+      && actionBox.y + actionBox.height > statusBox!.y;
+    expect(overlapsStatus).toBe(false);
+  }
 });
 
 test('application routes and planner emit no browser console warnings or errors', async ({ page }) => {
@@ -305,6 +349,8 @@ test('planner derives selected shipment weight, clears stale quotes, and keeps d
   await page.locator('.shipment-card').first().getByRole('button', { name: 'Calculate Shipping' }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
+  await expect(dialog.locator('#ship-to-postcode')).toHaveValue('2112');
+  await page.screenshot({ path: 'test-results/shipping-planner-customer-destination.png' });
   await dialog.getByRole('button', { name: 'Shipment 101 · Australia Post' }).click();
   const firstLine = dialog.getByRole('checkbox').first();
   await firstLine.uncheck();
@@ -315,13 +361,16 @@ test('planner derives selected shipment weight, clears stale quotes, and keeps d
   await dialog.getByLabel('Length cm').fill('20');
   await dialog.getByLabel('Width cm').fill('15');
   await dialog.getByLabel('Height cm').fill('12');
+  let quoteRequest: Record<string, any> | undefined;
   await page.route('**/api/shipping/orders/**/quotes/preview', async route => {
+    quoteRequest = route.request().postDataJSON();
     await new Promise(resolve => setTimeout(resolve, 250));
     await route.fulfill({ json: { rates: [{ quote_id: 'quote-1', service_name: 'Parcel Post', product_id: 'P1', shipping_cost: '9.00', fuel_surcharge: '0.00', gst: '0.90', total_cost: '9.90' }] } });
   });
   await dialog.getByRole('button', { name: 'Get Rates' }).click();
   await expect(dialog.getByRole('button', { name: 'Getting Rates…' })).toBeDisabled();
   await expect(dialog.getByText('Parcel Post')).toBeVisible();
+  expect(quoteRequest?.destination).toEqual({ type: 'STANDARD_ADDRESS', lines: ['1 Test Rd', 'Unit 4'], suburb: 'Ryde', state: 'NSW', postcode: '2112', country: 'AU' });
   await dialog.getByLabel('Gross Weight kg').fill('0.750');
   await expect(dialog.getByText('Parcel Post')).toHaveCount(0);
   await dialog.getByText('Shipment 102 · Australia Post').click();
@@ -367,7 +416,7 @@ test('missing tracking number uses a transient MUI notification', async ({ page 
   const notification = page.locator('.MuiSnackbar-root').getByRole('alert');
   await expect(notification).toHaveText('Enter a tracking number before querying this shipment.');
   await expect(notification).toBeVisible();
-  await expect(page.locator('.order-form-toolbar + .MuiAlert-root')).toHaveCount(0);
+  await expect(page.locator('.order-workflow-panel + .MuiAlert-root')).toHaveCount(0);
   await page.screenshot({ path: 'test-results/tracking-notification.png' });
 });
 
@@ -399,7 +448,11 @@ test('tracking drawer wraps long article identifiers without overlapping status'
   const status = await drawer.locator('.tracking-article-card .MuiChip-root').boundingBox();
   expect(title && status).toBeTruthy();
   expect(status!.width).toBeGreaterThanOrEqual(96);
-  expect(title!.x + title!.width).toBeLessThanOrEqual(status!.x + 1);
+  const overlaps = title!.x < status!.x + status!.width
+    && title!.x + title!.width > status!.x
+    && title!.y < status!.y + status!.height
+    && title!.y + title!.height > status!.y;
+  expect(overlaps).toBe(false);
   const content = drawer.locator('.tracking-drawer-content');
   const dimensions = await content.evaluate(element => ({ clientWidth: element.clientWidth, scrollWidth: element.scrollWidth }));
   expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth + 1);

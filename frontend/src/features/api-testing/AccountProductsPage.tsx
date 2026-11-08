@@ -51,10 +51,12 @@ interface AccountProductsResponse {
   products: AccountProduct[];
 }
 
+/** 将账户 API 返回的三态布尔值格式化，未知值与明确的否区分显示。 */
 function booleanLabel(value: boolean | null, trueLabel = 'Yes', falseLabel = 'No') {
   return value === null ? '—' : value ? trueLabel : falseLabel;
 }
 
+/** 按风险优先级生成账户状态：冻结优先于合同到期状态。 */
 function accountStatus(account: AccountProductsResponse['account']) {
   if (account.credit_blocked === true) return { label: 'Credit blocked', color: 'warning' as const };
   if (account.expired === true) return { label: 'Expired', color: 'default' as const };
@@ -62,6 +64,7 @@ function accountStatus(account: AccountProductsResponse['account']) {
   return { label: 'Status unavailable', color: 'default' as const };
 }
 
+/** 查询并展示选定 Australia Post 账号的合同与产品资格信息。 */
 export function AccountProductsPage() {
   const { accounts, loading: accountsLoading, error: accountsError, defaultAccountId } = useShippingAccounts();
   const [profileId, setProfileId] = useState('');
@@ -69,7 +72,7 @@ export function AccountProductsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // 账号选择只更新表单状态，查询由用户显式触发，避免切换账号时自动请求。
+  /** 由用户显式查询，避免仅切换账号时触发上游 API 请求。 */
   const loadAccount = useCallback(async () => {
     if (!profileId) return;
     setLoading(true);

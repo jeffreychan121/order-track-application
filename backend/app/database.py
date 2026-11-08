@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable
 from datetime import date, datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
@@ -16,6 +17,7 @@ DEFAULT_DB = PROJECT_ROOT / "data" / "oms.db"
 
 
 def _database_url() -> str:
+    """读取 DATABASE_URL；默认 SQLite 文件位于项目 data 目录，便于稳定定位。"""
     value = os.getenv("DATABASE_URL", "").strip()
     if not value:
         DEFAULT_DB.parent.mkdir(parents=True, exist_ok=True)
@@ -31,6 +33,7 @@ SessionLocal = None
 
 
 def configure_database(url: str | None = None) -> None:
+    """创建 SQLAlchemy 引擎和会话工厂；测试切换数据库时会先释放旧引擎。"""
     global DATABASE_URL, engine, SessionLocal
     if engine is not None:
         engine.dispose()
@@ -45,6 +48,7 @@ def configure_database(url: str | None = None) -> None:
 
     @event.listens_for(engine, "connect")
     def _enable_foreign_keys(dbapi_connection, _connection_record):
+        """SQLite 默认关闭外键，此连接钩子确保删除保护在每个连接上生效。"""
         if DATABASE_URL.startswith("sqlite"):
             cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA foreign_keys=ON")
@@ -191,6 +195,7 @@ class ShipmentPackageRow(Base):
 
 
 def init_db() -> None:
+    """创建缺少的表，再按顺序迁移旧库并补齐承运商和种子数据。"""
     Base.metadata.create_all(bind=engine)
     _migrate_legacy_schema()
     seed_carriers()
@@ -230,28 +235,35 @@ def _migrate_legacy_schema() -> None:
                 ))
                 # 旧订单曾先舍入单价再乘数量；迁移时按行含税总额重算，且保留既有 RRP 与 Shipment 费用。
                 line_rows = connection.execute(text(
-                    "SELECT id, order_id, rrp_incl_gst_cents, quantity FROM order_lines"
+                    "SELECT id, rrp_incl_gst_cents, quantity FROM order_lines"
                 )).mappings()
-                order_totals: dict[int, tuple[int, int]] = {}
                 for line in line_rows:
                     gross_cents = int(line["rrp_incl_gst_cents"]) * int(line["quantity"])
                     net_cents = _net_line_cents(gross_cents, 1000)
                     connection.execute(text(
                         "UPDATE order_lines SET line_subtotal_ex_gst_cents = :net WHERE id = :id"
                     ), {"net": net_cents, "id": line["id"]})
-                    # 总小计和 GST 分别累加到所属订单，沿用整数分避免二进制浮点误差。
-                    order_id = int(line["order_id"])
-                    subtotal, gst = order_totals.get(order_id, (0, 0))
-                    order_totals[order_id] = (subtotal + net_cents, gst + gross_cents - net_cents)
-                for order in connection.execute(text(
-                    "SELECT id, shipping_fee_cents FROM orders"
-                )).mappings():
-                    subtotal, gst = order_totals.get(int(order["id"]), (0, 0))
-                    shipping = int(order["shipping_fee_cents"] or 0)
-                    connection.execute(text(
-                        "UPDATE orders SET subtotal_ex_gst_cents = :subtotal, gst_cents = :gst, "
-                        "total_cents = :total WHERE id = :id"
-                    ), {"subtotal": subtotal, "gst": gst, "total": subtotal + gst + shipping, "id": order["id"]})
+        # 按新口径幂等重算已有订单汇总，避免旧数据库继续显示行级 GST 总额。
+        if "orders" in tables and "order_lines" in tables:
+            line_bases_by_order: dict[int, list[tuple[int, int]]] = {}
+            for line in connection.execute(text(
+                "SELECT order_id, line_subtotal_ex_gst_cents, gst_rate_basis_points FROM order_lines"
+            )).mappings():
+                line_bases_by_order.setdefault(int(line["order_id"]), []).append(
+                    (int(line["line_subtotal_ex_gst_cents"]), int(line["gst_rate_basis_points"]))
+                )
+            for order in connection.execute(text(
+                "SELECT id, shipping_fee_cents FROM orders"
+            )).mappings():
+                order_id = int(order["id"])
+                line_bases = line_bases_by_order.get(order_id, [])
+                subtotal = sum(net_cents for net_cents, _ in line_bases)
+                gst = _order_gst_cents(line_bases)
+                shipping = int(order["shipping_fee_cents"] or 0)
+                connection.execute(text(
+                    "UPDATE orders SET subtotal_ex_gst_cents = :subtotal, gst_cents = :gst, "
+                    "total_cents = :total WHERE id = :id"
+                ), {"subtotal": subtotal, "gst": gst, "total": subtotal + gst + shipping, "id": order_id})
 
 
 def seed_carriers() -> None:
@@ -278,6 +290,7 @@ def seed_carriers() -> None:
 
 
 def _cents(value: str | int | float) -> int:
+    """通过 Decimal 字符串化消除二进制浮点误差，再舍入到整数分。"""
     return int((Decimal(str(value)) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
@@ -289,15 +302,86 @@ def _net_line_cents(gross_cents: int, rate_basis_points: int) -> int:
     return gross_cents - gst_cents
 
 
-def seed_initial_data() -> None:
-    """Import the assessment JSON once, without overwriting existing DB records."""
+def _order_gst_cents(line_tax_bases: Iterable[tuple[int, int]]) -> int:
+    """先按税率汇总未税金额，再对各税率组 GST 舍入到整数分。"""
+    bases_by_rate: dict[int, int] = {}
+    for net_cents, rate_basis_points in line_tax_bases:
+        bases_by_rate[rate_basis_points] = bases_by_rate.get(rate_basis_points, 0) + net_cents
+    return sum(
+        int((Decimal(net_cents * rate_basis_points) / Decimal(10_000)).quantize(
+            Decimal("1"), rounding=ROUND_HALF_UP
+        ))
+        for rate_basis_points, net_cents in bases_by_rate.items()
+    )
+
+
+def _read_seed_json(path: Path):
+    """读取 JSON 种子文件；错误信息只说明文件名和错误类型，不回显数据内容。"""
     import json
+
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Unable to read seed file {path.name}: {exc.__class__.__name__}") from exc
+
+
+def _validate_seed_payload(raw, schema, source_name: str):
+    """复用 API 的 Pydantic 输入模型校验种子数据，不回显可能含个人信息的值。"""
+    from pydantic import ValidationError
+
+    try:
+        return schema.model_validate(raw)
+    except ValidationError as exc:
+        details = [
+            f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
+            for error in exc.errors(include_input=False)
+        ]
+        raise ValueError(f"Invalid seed data in {source_name}: " + "; ".join(details)) from exc
+
+
+def _read_validated_seed(path: Path, schema):
+    """读取并复用 API 的 Pydantic 输入模型校验种子文件。"""
+    raw = _read_seed_json(path)
+    _validate_seed_payload(raw, schema, path.name)
+    return raw
+
+
+def seed_initial_data() -> None:
+    """先校验完整种子，再仅导入数据库中不存在的商品和订单。"""
+    from .models import OrderDataset, ProductCatalog
+
     products_path = PROJECT_ROOT / "data" / "products.json"
     orders_path = PROJECT_ROOT / "data" / "orders.json"
     created_orders_path = PROJECT_ROOT / "data" / "created_orders.json"
+
+    # 先在事务外校验所有输入，避免坏文件导致只导入一部分商品或订单。
+    catalog = _read_validated_seed(products_path, ProductCatalog) if products_path.exists() else None
+    dataset = _read_validated_seed(orders_path, OrderDataset) if orders_path.exists() else None
+    order_items = list(dataset.get("orders", [])) if dataset else []
+    if dataset and created_orders_path.exists():
+        # 兼容旧版 JSON 存储的订单；允许空文件，但非空时使用相同订单 schema 校验。
+        legacy_created = _read_seed_json(created_orders_path)
+        if not isinstance(legacy_created, dict) or not isinstance(legacy_created.get("orders"), list):
+            _validate_seed_payload(legacy_created, OrderDataset, created_orders_path.name)
+        legacy_items = legacy_created["orders"]
+        if legacy_items:
+            _validate_seed_payload(legacy_created, OrderDataset, created_orders_path.name)
+            order_items.extend(legacy_items)
+    if dataset and order_items:
+        # 合并后再校验一次，捕获主种子与兼容文件之间重复的订单号。
+        _validate_seed_payload({"currency": dataset["currency"], "orders": order_items}, OrderDataset, "combined order seeds")
+
+    if order_items:
+        seeded_skus = {item["sku"] for item in (catalog or {}).get("products", [])}
+        with SessionLocal() as session:
+            existing_skus = set(session.scalars(select(ProductRow.sku)).all())
+        referenced_skus = {line["sku"] for item in order_items for line in item["line_items"]}
+        unknown_skus = sorted(referenced_skus - seeded_skus - existing_skus)
+        if unknown_skus:
+            raise ValueError("Seed orders reference unknown SKU(s): " + ", ".join(unknown_skus))
+
     with SessionLocal.begin() as session:
-        if products_path.exists():
-            catalog = json.loads(products_path.read_text(encoding="utf-8"))
+        if catalog:
             for item in catalog.get("products", []):
                 if session.get(ProductRow, item["sku"]):
                     continue
@@ -312,13 +396,7 @@ def seed_initial_data() -> None:
                     dosage_type=item.get("dosage_type"), product_type=item.get("product_type"),
                     status=item.get("status"), image_url=None,
                 ))
-        if orders_path.exists():
-            dataset = json.loads(orders_path.read_text(encoding="utf-8"))
-            order_items = list(dataset.get("orders", []))
-            if created_orders_path.exists():
-                # 保留旧版 JSON 存储阶段已经创建的订单记录。
-                legacy_created = json.loads(created_orders_path.read_text(encoding="utf-8"))
-                order_items.extend(legacy_created.get("orders", []))
+        if dataset:
             for item in order_items:
                 if session.query(OrderRow).filter_by(order_no=item["order_id"]).first():
                     continue
@@ -349,16 +427,26 @@ def seed_initial_data() -> None:
                     row.shipments.append(db_shipment)
                     by_group[shipment.get("tracking_group")] = db_shipment
                 subtotal = 0
-                gst = 0
+                line_tax_bases: list[tuple[int, int]] = []
                 for line in item.get("line_items", []):
                     product = session.get(ProductRow, line["sku"])
                     if not product:
                         raise ValueError(f"Seed order references unknown SKU {line['sku']}")
-                    rate_basis_points = 1000
-                    gross_line_cents = product.rrp_incl_gst_cents * int(line["quantity"])
+                    # 种子订单支持与 API 相同的行级价格和税率快照；未提供时使用商品 RRP 和 10%。
+                    saved_price_cents = (
+                        _cents(line["rrp_incl_gst"])
+                        if line.get("rrp_incl_gst") is not None
+                        else product.rrp_incl_gst_cents
+                    )
+                    rate_basis_points = (
+                        int(Decimal(str(line["gst_rate_percent"])) * 100)
+                        if line.get("gst_rate_percent") is not None
+                        else 1000
+                    )
+                    gross_line_cents = saved_price_cents * int(line["quantity"])
                     line_cents = _net_line_cents(gross_line_cents, rate_basis_points)
                     db_line = OrderLineRow(order_id=row.id, sku=product.sku, quantity=line["quantity"],
-                        rrp_incl_gst_cents=product.rrp_incl_gst_cents, gst_rate_basis_points=rate_basis_points,
+                        rrp_incl_gst_cents=saved_price_cents, gst_rate_basis_points=rate_basis_points,
                         line_subtotal_ex_gst_cents=line_cents)
                     row.lines.append(db_line)
                     session.flush()
@@ -366,7 +454,8 @@ def seed_initial_data() -> None:
                     if shipment:
                         shipment.lines.append(db_line)
                     subtotal += line_cents
-                    gst += gross_line_cents - line_cents
+                    line_tax_bases.append((line_cents, rate_basis_points))
+                gst = _order_gst_cents(line_tax_bases)
                 row.subtotal_ex_gst_cents, row.gst_cents = subtotal, gst
                 row.shipping_fee_cents = sum(s.shipping_fee_cents for s in row.shipments)
                 row.total_cents = subtotal + gst + row.shipping_fee_cents

@@ -8,6 +8,7 @@ interface TableStateProps {
   emptyText: string;
 }
 
+/** 统一表格的加载、空数据和内容状态，避免各页状态切换样式不一致。 */
 export function TableState({ children, loading, empty, emptyText }: TableStateProps) {
   return <Paper variant="outlined" sx={{ overflow: 'hidden' }} aria-busy={loading}>
     {loading ? <Box sx={{ p: 6, textAlign: 'center' }} role="status" aria-label="Loading table"><CircularProgress size={28}/></Box>

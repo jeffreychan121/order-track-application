@@ -31,6 +31,7 @@ const apiItems: NavigationItem[] = [
   { label: 'Account Products', path: '/api-testing/accounts', icon: AccountBalance },
 ];
 
+/** 读取侧栏展开偏好；存储不可用时采用默认展开状态。 */
 function readExpandedPreference(): boolean {
   try {
     return window.localStorage.getItem(SIDEBAR_STORAGE_KEY) !== 'false';
@@ -40,6 +41,7 @@ function readExpandedPreference(): boolean {
   }
 }
 
+/** 全局导航：支持桌面折叠、API Testing 分组和窄屏临时抽屉。 */
 export function AppSidebar() {
   const location = useLocation();
   const theme = useTheme();
@@ -55,6 +57,7 @@ export function AppSidebar() {
     if (apiRouteActive) setApiOpen(true);
   }, [apiRouteActive]);
 
+  /** 切换侧栏宽度，并尽力持久化偏好；存储异常不影响当前导航。 */
   const toggleExpanded = () => {
     setExpanded(current => {
       const next = !current;
@@ -67,6 +70,7 @@ export function AppSidebar() {
     });
   };
 
+  /** 用户在折叠栏中打开 API Testing 时，先展开侧栏以显示子项。 */
   const expandSidebar = () => {
     setExpanded(true);
     try {
@@ -80,6 +84,7 @@ export function AppSidebar() {
     ? location.pathname === path || location.pathname.startsWith('/orders/')
     : location.pathname === path || location.pathname.startsWith(`${path}/`);
 
+  /** 按桌面折叠态或移动抽屉状态渲染统一导航链接。 */
   const renderLink = (item: NavigationItem, nested = false, compact = false) => {
     const labelsVisible = expanded || compact;
     const Icon = item.icon;
@@ -111,6 +116,7 @@ export function AppSidebar() {
     return labelsVisible ? button : <Tooltip key={item.path} title={item.label} placement="right">{button}</Tooltip>;
   };
 
+  /** 桌面和移动抽屉复用同一导航内容，避免两套菜单行为不一致。 */
   const sidebarContent = (compact: boolean) => {
     const labelsVisible = expanded || compact;
     return <Box className="sidebar-content" sx={{ width: compact ? EXPANDED_WIDTH : width }}>

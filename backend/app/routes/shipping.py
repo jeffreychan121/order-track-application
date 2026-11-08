@@ -46,6 +46,7 @@ def pricing_account_products(account_id: str | None = Query(default=None), refre
 
 @router.post("/rates")
 def quote_shipping(payload: ShippingRateInput):
+    """查询报价前校验承运商适配器，防止把 TNT 或未知承运商发给 Australia Post。"""
     carrier_name = "Australia Post"
     if payload.carrier_id is not None:
         with database.SessionLocal() as session:
@@ -69,6 +70,7 @@ def quote_shipping(payload: ShippingRateInput):
 
 @router.post("/shipments/{shipment_id}/apply-rate")
 def apply_rate(shipment_id: int, payload: ApplyQuoteInput):
+    """只接受与目标 Shipment 绑定的缓存报价，并保存其运费快照。"""
     try:
         quote = cached_quote(payload.quote_id, shipment_id=shipment_id)
         return db_service.apply_shipping_quote(shipment_id, quote)
@@ -81,6 +83,7 @@ def apply_rate(shipment_id: int, payload: ApplyQuoteInput):
 
 @router.post("/orders/{order_no}/quotes/preview")
 def preview_order_quote(order_no: str, payload: ShippingQuotePreviewInput):
+    """预览草稿订单的 Shipment 报价，并校验分配、重量和承运商约束。"""
     plan = payload.model_dump(mode="json", exclude={"shipment_id"})
     with database.SessionLocal() as session:
         order = session.scalar(select(OrderRow).where(OrderRow.order_no == order_no))
@@ -133,6 +136,7 @@ def preview_order_quote(order_no: str, payload: ShippingQuotePreviewInput):
 
 @router.post("/orders/{order_no}/shipments/save")
 def save_planned(order_no: str, payload: PlannedShipmentInput):
+    """保存尚未应用报价的 Shipment 计划及账号展示快照。"""
     try:
         plan = payload.model_dump(mode="json")
         if payload.shipping_account_profile_id:
@@ -149,6 +153,7 @@ def save_planned(order_no: str, payload: PlannedShipmentInput):
 
 @router.post("/orders/{order_no}/quotes/apply")
 def apply_planned_quote(order_no: str, payload: ApplyQuoteInput):
+    """按订单编号核对报价归属，再将缓存中的 Shipping Planner 方案落库。"""
     try:
         quote = cached_quote(payload.quote_id, order_no=order_no)
         if not quote.get("planner_context"):

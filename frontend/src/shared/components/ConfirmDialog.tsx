@@ -15,6 +15,7 @@ interface ConfirmDialogProps extends ConfirmOptions {
   onCancel: () => void;
 }
 
+/** 共享二次确认对话框，业务调用方通过回调决定确认后的动作。 */
 export function ConfirmDialog({
   open,
   title,

@@ -19,10 +19,12 @@ CENT = Decimal("0.01")
 
 
 class BusinessError(ValueError):
+    """表示数据格式合法但不符合订单、Shipment 或金额业务规则。"""
     pass
 
 
 def _money_cents(value: Decimal) -> int:
+    """把 Decimal 金额按 HALF_UP 规则转换为整数分存储。"""
     return int((value * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
@@ -39,14 +41,16 @@ def _line_amounts(gross_unit_cents: int, quantity: int, rate_basis_points: int) 
 
 
 def money(cents: int) -> str:
+    """把整数分格式化为两位小数的金额字符串，避免浮点运算。"""
     return format(Decimal(cents) / 100, ".2f")
 
 
 def _recalculate(order: OrderRow) -> None:
+    """根据已保存的订单行与 Shipment 费用重算订单级金额字段。"""
     subtotal = sum(line.line_subtotal_ex_gst_cents for line in order.lines)
-    # GST 按各订单行的含税快照、税率和行级舍入结果累计。
-    gst = sum(
-        line.rrp_incl_gst_cents * line.quantity - line.line_subtotal_ex_gst_cents
+    # 同税率订单按订单未税小计统一舍入；混合税率时先按税率分组再汇总。
+    gst = database._order_gst_cents(
+        (line.line_subtotal_ex_gst_cents, line.gst_rate_basis_points)
         for line in order.lines
     )
     shipping = sum(item.shipping_fee_cents for item in order.shipments)
@@ -57,6 +61,7 @@ def _recalculate(order: OrderRow) -> None:
 
 
 def _response(order: OrderRow) -> OrderDetailResponse:
+    """从预加载的 ORM 关联构造完整详情响应，并统一金额显示格式。"""
     lines = []
     for line in order.lines:
         rate_denominator = Decimal(10_000 + line.gst_rate_basis_points)
@@ -103,11 +108,12 @@ def _response(order: OrderRow) -> OrderDetailResponse:
                 if order.lines and len({line.gst_rate_basis_points for line in order.lines}) == 1 else "Mixed rates"),
             gst_amount=money(order.gst_cents), shipment_fee=money(order.shipping_fee_cents),
             shipment_fee_status=("quoted" if order.shipping_fee_cents else "not_quoted"), total=money(order.total_cents)),
-        calculation_note="Amounts use saved order-line price and GST-rate snapshots with Decimal and half-up cent rounding.",
+        calculation_note="Order GST is rounded from the order-level ex-GST subtotal; mixed rates are grouped by saved order-line tax rate.",
     )
 
 
 def list_products(search: str | None = None) -> list[dict]:
+    """按 SKU 顺序列出商品；搜索同时覆盖 SKU、名称和描述。"""
     with database.SessionLocal() as session:
         stmt = select(ProductRow).order_by(ProductRow.sku)
         if search:
@@ -118,6 +124,7 @@ def list_products(search: str | None = None) -> list[dict]:
 
 
 def _product_dict(p: ProductRow) -> dict:
+    """把数据库单位换算信息映射为前端统一的 value/unit 结构。"""
     return {"sku": p.sku, "name": p.name, "description": p.description,
         "rrp_incl_gst": money(p.rrp_incl_gst_cents), "currency": "AUD",
         "weight": {"value": str(p.weight_g), "unit": "g"} if p.weight_g is not None else None,
@@ -127,12 +134,14 @@ def _product_dict(p: ProductRow) -> dict:
 
 
 def get_product(sku: str) -> dict | None:
+    """按 SKU 获取商品；不存在时返回 None 供路由层映射为 404。"""
     with database.SessionLocal() as session:
         product = session.get(ProductRow, sku)
         return _product_dict(product) if product else None
 
 
 def create_product(payload: dict) -> dict:
+    """校验商品价格和整数尺寸后创建目录记录，SKU 统一转为大写。"""
     sku = str(payload.get("sku") or "").strip().upper()
     name = str(payload.get("name") or "").strip()
     if not sku or not name:
@@ -230,6 +239,7 @@ def delete_product(sku: str) -> None:
 
 
 def list_orders(search: str | None = None, status: str | None = None, sort_by: str = "date") -> list[OrderDetailResponse]:
+    """一次预加载订单详情所需关系，避免列表序列化时产生逐行查询。"""
     with database.SessionLocal() as session:
         stmt = select(OrderRow).options(selectinload(OrderRow.lines).selectinload(OrderLineRow.product),
             selectinload(OrderRow.lines).selectinload(OrderLineRow.shipments), selectinload(OrderRow.shipments).selectinload(ShipmentRow.lines))
@@ -246,6 +256,7 @@ def list_orders(search: str | None = None, status: str | None = None, sort_by: s
 
 
 def get_order(order_no: str) -> OrderDetailResponse | None:
+    """按订单号加载详情依赖的关联数据，并转换成 API 响应模型。"""
     with database.SessionLocal() as session:
         order = session.scalar(select(OrderRow).where(OrderRow.order_no == order_no).options(
             selectinload(OrderRow.lines).selectinload(OrderLineRow.product),
@@ -262,6 +273,7 @@ def _set_lines_and_shipments(
     preserved_rates: dict[str, int] | None = None,
     preserved_quotes: dict[str, dict] | None = None,
 ) -> None:
+    """重建订单行与 Shipment 关联，同时按 SKU 保留价格、税率和有效运费快照。"""
     if not payload.line_items:
         raise BusinessError("At least one order line is required")
     product_map = {p.sku: p for p in session.scalars(select(ProductRow).where(ProductRow.sku.in_({x.sku for x in payload.line_items}))).all()}
@@ -332,6 +344,7 @@ def _set_lines_and_shipments(
 
 
 def create_order(payload: CreateOrderInput) -> OrderDetailResponse:
+    """在单个数据库事务内创建草稿订单及其订单行、Shipment 关系。"""
     if not payload.customer.name.strip() or not payload.company_name.strip():
         raise BusinessError("Customer name and company are required")
     if not payload.shipping_address.postcode.isdigit() or len(payload.shipping_address.postcode) != 4:
@@ -359,6 +372,7 @@ def create_order(payload: CreateOrderInput) -> OrderDetailResponse:
 
 
 def _carrier_for_payload(session: Session, payload: dict, *, allow_inactive: bool = False) -> CarrierRow:
+    """优先按承运商 ID 解析，兼容旧名称字段，并阻止新记录使用停用承运商。"""
     carrier_id = payload.get("carrier_id")
     carrier = session.get(CarrierRow, int(carrier_id)) if carrier_id else None
     if not carrier and payload.get("carrier"):
@@ -371,6 +385,7 @@ def _carrier_for_payload(session: Session, payload: dict, *, allow_inactive: boo
 
 
 def update_draft(order_no: str, changes: dict) -> OrderDetailResponse:
+    """合并局部编辑内容并重新校验草稿；只有地址、承运商或分配变化时才失效报价。"""
     with database.SessionLocal.begin() as session:
         order = session.scalar(select(OrderRow).where(OrderRow.order_no == order_no).options(
             selectinload(OrderRow.lines).selectinload(OrderLineRow.shipments),
@@ -474,6 +489,7 @@ def update_draft(order_no: str, changes: dict) -> OrderDetailResponse:
 
 
 def transition_status(order_no: str, target: str) -> OrderDetailResponse:
+    """应用状态机迁移，并在进入运输状态前要求至少一条有效运单号。"""
     sequence = {"draft": "confirmed", "confirmed": "in_transit", "in_transit": "completed"}
     with database.SessionLocal.begin() as session:
         order = session.scalar(select(OrderRow).where(OrderRow.order_no == order_no).options(selectinload(OrderRow.shipments)))
@@ -495,6 +511,7 @@ def transition_status(order_no: str, target: str) -> OrderDetailResponse:
 
 
 def add_shipment(order_no: str, payload: dict) -> OrderDetailResponse:
+    """仅为草稿订单新增 Shipment，并验证订单行属于本订单且未被其他 Shipment 占用。"""
     with database.SessionLocal.begin() as session:
         order = session.scalar(select(OrderRow).where(OrderRow.order_no == order_no).options(selectinload(OrderRow.shipments), selectinload(OrderRow.lines).selectinload(OrderLineRow.shipments)))
         if not order:
@@ -526,6 +543,7 @@ def add_shipment(order_no: str, payload: dict) -> OrderDetailResponse:
 
 
 def delete_shipment(shipment_id: int) -> None:
+    """删除草稿 Shipment 前先解除订单行关联，使这些行回到未分配状态。"""
     with database.SessionLocal.begin() as session:
         shipment = session.get(ShipmentRow, shipment_id)
         if not shipment:
@@ -540,6 +558,7 @@ def delete_shipment(shipment_id: int) -> None:
 
 
 def patch_shipment(shipment_id: int, changes: dict) -> OrderDetailResponse:
+    """更新 Shipment；确认后仅开放运单号保存这一项受限编辑。"""
     with database.SessionLocal.begin() as session:
         shipment = session.get(ShipmentRow, shipment_id)
         if not shipment:
@@ -580,6 +599,7 @@ def patch_shipment(shipment_id: int, changes: dict) -> OrderDetailResponse:
 
 
 def apply_shipping_quote(shipment_id: int, quote: dict) -> OrderDetailResponse:
+    """确认缓存报价属于目标订单和 Shipment 后保存费用及报价来源快照。"""
     with database.SessionLocal.begin() as session:
         shipment = session.get(ShipmentRow, shipment_id)
         if not shipment:
@@ -604,6 +624,7 @@ def apply_shipping_quote(shipment_id: int, quote: dict) -> OrderDetailResponse:
 
 
 def product_weight_for_lines(session: Session, order: OrderRow, line_ids: list[int], *, allowed_shipment_id: int | None = None) -> int:
+    """计算所选订单行净重（克），同时检查重复选择、跨单引用和既有分配。"""
     unique_ids = set(line_ids)
     if len(unique_ids) != len(line_ids):
         raise BusinessError("Order lines cannot be selected more than once")

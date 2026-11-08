@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 class InputModel(BaseModel):
+    """输入模型默认忽略未知字段，以兼容旧版客户端提交的扩展属性。"""
     model_config = ConfigDict(extra="ignore")
 
 
@@ -16,6 +17,7 @@ class Customer(InputModel):
     @field_validator("email")
     @classmethod
     def validate_email(cls, value: str) -> str:
+        """去除首尾空格，并执行适合表单输入的基础邮箱格式校验。"""
         value = value.strip()
         if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", value):
             raise ValueError("Enter a valid email address")
@@ -24,6 +26,7 @@ class Customer(InputModel):
     @field_validator("phone")
     @classmethod
     def validate_phone(cls, value: str) -> str:
+        """保留用户输入格式，只用数字位数检查电话号码是否合理。"""
         value = value.strip()
         digits = re.sub(r"\D", "", value)
         if not 7 <= len(digits) <= 15:
@@ -51,6 +54,7 @@ class OrderLine(InputModel):
     @field_validator("rrp_incl_gst")
     @classmethod
     def validate_finite_rrp(cls, value: Decimal | None) -> Decimal | None:
+        """拒绝 Decimal 的 NaN 和 Infinity，避免它们进入金额计算。"""
         if value is not None and not value.is_finite():
             raise ValueError("rrp_incl_gst must be a finite positive amount")
         return value
@@ -58,6 +62,7 @@ class OrderLine(InputModel):
     @field_validator("gst_rate_percent")
     @classmethod
     def validate_gst_rate(cls, value: Decimal | None) -> Decimal | None:
+        """税率以百分数输入，最多保留两位小数并排除非有限值。"""
         if value is None:
             return value
         if not value.is_finite() or value.as_tuple().exponent < -2:
@@ -74,6 +79,7 @@ class Shipment(InputModel):
 
     @model_validator(mode="after")
     def require_carrier(self) -> "Shipment":
+        """允许通过承运商 ID 或兼容名称指定，但至少必须提供其中一个。"""
         if self.carrier_id is None and not (self.carrier and self.carrier.strip()):
             raise ValueError("Carrier is required")
         return self
@@ -91,9 +97,12 @@ class Order(InputModel):
 
     @model_validator(mode="after")
     def validate_shipment_groups(self) -> "Order":
+        """确保导入订单的每个订单行分组都能对应到已声明的 Shipment。"""
+        if not self.shipments:
+            return self
         known_groups = {shipment.tracking_group for shipment in self.shipments}
         missing_groups = sorted(
-            {line.tracking_group for line in self.line_items} - known_groups
+            {line.tracking_group for line in self.line_items if line.tracking_group} - known_groups
         )
         if missing_groups:
             raise ValueError(
@@ -114,6 +123,7 @@ class CreateOrderInput(InputModel):
 
     @model_validator(mode="after")
     def validate_shipment_groups(self) -> "CreateOrderInput":
+        """新订单可暂不建 Shipment；若已填写分组则校验归属且运单号不重复。"""
         known_groups = {shipment.tracking_group for shipment in self.shipments}
         if not self.shipments:
             return self
@@ -132,6 +142,7 @@ class OrderDataset(InputModel):
 
     @model_validator(mode="after")
     def validate_unique_order_ids(self) -> "OrderDataset":
+        """种子文件中的订单号必须唯一，避免后续导入时产生覆盖歧义。"""
         order_ids = [order.order_id for order in self.orders]
         if len(order_ids) != len(set(order_ids)):
             raise ValueError("orders.json contains duplicate order_id values")
@@ -221,6 +232,7 @@ class Product(InputModel):
     @field_validator("rrp_incl_gst")
     @classmethod
     def validate_finite_price(cls, value: Decimal) -> Decimal:
+        """产品价格必须是有限 Decimal，正数范围由字段约束负责。"""
         if not value.is_finite():
             raise ValueError("rrp_incl_gst must be a finite decimal amount")
         return value
@@ -234,6 +246,7 @@ class ProductCatalog(InputModel):
 
     @model_validator(mode="after")
     def validate_catalog(self) -> "ProductCatalog":
+        """强制目录声明含税 RRP、10% GST、唯一 SKU 和一致币种。"""
         if not self.rrp_includes_gst:
             raise ValueError("products.json must declare that RRP includes GST")
         if self.gst_rate != Decimal("0.10"):
