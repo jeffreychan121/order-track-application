@@ -16,6 +16,8 @@ import { Alert, Autocomplete, Box, Button, Chip, CircularProgress, Dialog, Dialo
 
 type LineInput = { sku: string; quantity: number | string; tracking_group: string; rrp_incl_gst?: string; gst_rate_percent?: string };
 type ShipmentInput = { id?: number; tracking_group: string; carrier: string; carrier_id?: number; shipping_account_profile_id?: string | null; tracking_number: string };
+/** 用承运商和运单号共同标识结果，避免不同承运商重复使用编号时串数据。 */
+const trackingKey = (carrier: string, trackingNumber: string) => `${carrier.trim().toLowerCase()}|${trackingNumber.trim()}`;
 /** 订单详情与新建共用此表单；saved 表示服务端快照，form 表示当前编辑草稿。 */
 export function OrderForm({ productsKey }: { productsKey: number }) {
   const { id } = useParams(); const isNew = !id; const navigate = useNavigate();
@@ -40,38 +42,71 @@ export function OrderForm({ productsKey }: { productsKey: number }) {
   useEffect(() => { loadProducts(); }, [productsKey]);
   useEffect(() => { api('/api/carriers').then(setCarriers).catch(err => setError(err.message)); }, [productsKey]);
   useEffect(() => {
+    activeTrackingOrderRef.current = null;
+    trackingLoadSignatureRef.current = {};
+    setTrackingMap({});
+    setTrackingDrawer(null);
+    setTrackingDrawerShipment(null);
     if (!id) { const empty = { order_date: new Date().toISOString().slice(0, 10), company_name: '', status: 'draft', customer: { name: '', phone: '', email: '' }, shipping_address: defaultOrderShippingAddress(), line_items: [], shipments: [] }; setForm(empty); setSaved(null); setEditing(true); setLoading(false); return; }
     let alive = true; setLoading(true); api(`/api/orders/${encodeURIComponent(id)}`).then(order => { if (!alive) return; setSaved(order); setForm(hydrate(order)); setEditing(false); }).catch(err => setError(err.message)).finally(() => alive && setLoading(false)); return () => { alive = false; };
   }, [id]);
-  // 只在运单集合变化时更新签名，切换标签页时复用已有结果避免重复查询。
+  // 订单详情一加载就读取数据库快照；后端只会在无快照或快照过期时自动访问承运商。
   const trackingSnapshotKey = JSON.stringify((saved?.shipments || [])
     .filter((shipment: AnyRecord) => shipment.tracking_number?.trim())
-    .map((shipment: AnyRecord) => `${shipment.carrier}|${shipment.tracking_number.trim()}`).sort());
-  useEffect(() => { activeTrackingOrderRef.current = saved?.order_id ?? null; setTrackingLoading(false); }, [saved?.order_id]);
+    .map((shipment: AnyRecord) => `${shipment.id}|${shipment.carrier}|${shipment.tracking_number.trim()}`).sort());
   useEffect(() => {
-    if (!saved || tab !== 1 || !trackingSnapshotKey || trackingSnapshotKey === '[]') return;
+    activeTrackingOrderRef.current = saved?.order_id ?? null;
+    setTrackingLoading(false);
+  }, [saved?.order_id]);
+  useEffect(() => {
+    if (!saved || !trackingSnapshotKey || trackingSnapshotKey === '[]') return;
     const orderNo = saved.order_id as string;
     if (trackingLoadSignatureRef.current[orderNo] === trackingSnapshotKey) return;
 
-    // 浏览同一订单的其他页签时复用已加载结果；新运单号才进行一次非强制刷新查询。
+    // 一次加载当前订单的所有有运单号 Shipment；不因切换页签而重复请求。
     trackingLoadSignatureRef.current[orderNo] = trackingSnapshotKey;
     setTrackingLoading(true);
     api(`/api/orders/${encodeURIComponent(orderNo)}/tracking?refresh=false`).then((items: AnyRecord[]) => {
       if (activeTrackingOrderRef.current !== orderNo || trackingLoadSignatureRef.current[orderNo] !== trackingSnapshotKey) return;
-      setTrackingMap(previous => ({ ...previous, ...Object.fromEntries(items.map(item => [item.tracking_number, item])) }));
+      setTrackingMap(previous => ({ ...previous, ...Object.fromEntries(items.map(item => [trackingKey(item.carrier, item.tracking_number), item])) }));
       setTrackingDrawer(previous => previous
-        ? items.find(item => item.tracking_number === previous.tracking_number) || previous
+        ? items.find(item => item.tracking_number === previous.tracking_number && item.carrier === previous.carrier) || previous
         : previous);
     }).catch(() => {
-      if (trackingLoadSignatureRef.current[orderNo] === trackingSnapshotKey) {
-        delete trackingLoadSignatureRef.current[orderNo];
-        if (activeTrackingOrderRef.current === orderNo) setTrackingLoading(false);
-      }
-      /* Tracking 查询失败不阻断 Shipment；用户仍可从抽屉显式重试。 */
+      if (activeTrackingOrderRef.current !== orderNo) return;
+      // 订单追踪 API 整体不可达时，保留页面；有旧数据则标记过期，无旧数据则显示不可用并允许手动重试。
+      const attemptedAt = new Date().toISOString();
+      const fallbackFor = (shipment: AnyRecord, prior?: AnyRecord) => ({
+        ...prior,
+        carrier: shipment.carrier,
+        tracking_number: shipment.tracking_number,
+        overall_status: prior?.overall_status && prior.overall_status !== 'not_queried' ? prior.overall_status : 'unavailable',
+        tracking_error: prior?.tracking_error || 'Could not load saved tracking details. Check the connection and retry.',
+        tracking_error_code: 'REQUEST_FAILED',
+        tracking_query_status: 'failed',
+        tracking_last_attempt_at: attemptedAt,
+        tracking_stale: Boolean(prior?.tracking_last_successful_at),
+        consignment_events: prior?.consignment_events || [],
+        articles: prior?.articles || [],
+      });
+      setTrackingMap(previous => {
+        const next = { ...previous };
+        for (const shipment of (saved.shipments || []).filter((item: AnyRecord) => item.tracking_number?.trim())) {
+          const key = trackingKey(shipment.carrier, shipment.tracking_number);
+          next[key] = fallbackFor(shipment, next[key]);
+        }
+        return next;
+      });
+      setTrackingDrawer(previous => {
+        if (!previous) return previous;
+        const shipment = (saved.shipments || []).find((item: AnyRecord) =>
+          item.carrier === previous.carrier && item.tracking_number === previous.tracking_number);
+        return shipment ? fallbackFor(shipment, previous) : previous;
+      });
     }).finally(() => {
       if (activeTrackingOrderRef.current === orderNo && trackingLoadSignatureRef.current[orderNo] === trackingSnapshotKey) setTrackingLoading(false);
     });
-  }, [saved?.order_id, tab, trackingSnapshotKey]);
+  }, [saved?.order_id, trackingSnapshotKey]);
   const productMap = useMemo(() => new Map(products.map(product => [product.sku, product])), [products]);
   const lines: LineInput[] = form?.line_items || []; const shipments: ShipmentInput[] = form?.shipments || [];
   const selectedExistingLine = productChoice ? lines.find(line => line.sku === productChoice.sku) : undefined;
@@ -140,9 +175,36 @@ export function OrderForm({ productsKey }: { productsKey: number }) {
   // 确认状态仅允许独立保存运单号，这是业务状态机中的受限编辑例外。
   const saveConfirmedTracking = async (shipmentId: number, trackingNumber: string) => { setSaving(true); setError(''); try { const result = await api(`/api/shipments/${shipmentId}`, { method: 'PATCH', body: JSON.stringify({ tracking_number: trackingNumber }) }); setSaved(result); setForm(hydrate(result)); } catch (err: any) { setError(err.message); } finally { setSaving(false); } };
   // 空运单不发请求；网络失败被转换成可显示的 unavailable 结果，不中断 Shipment 页面。
-  const refreshShipmentTracking = async (shipment: AnyRecord) => { if (!shipment.tracking_number?.trim()) { setError(''); setNotice('Enter a tracking number before querying this shipment.'); return; } setTrackingBusy(shipment.tracking_number); try { const result = await api('/api/orders/tracking', { method: 'POST', body: JSON.stringify({ carrier: shipment.carrier, tracking_number: shipment.tracking_number.trim() }) }); setTrackingMap(previous => ({ ...previous, [shipment.tracking_number]: result })); return result; } catch (err: any) { const result = { carrier: shipment.carrier, tracking_number: shipment.tracking_number, overall_status: 'unavailable', tracking_error: err.message, tracking_error_code: 'REQUEST_FAILED', consignment_events: [], articles: [] }; setTrackingMap(previous => ({ ...previous, [shipment.tracking_number]: result })); return result; } finally { setTrackingBusy(null); } };
-  // 打开详情抽屉时先展示本地缓存；用户可在抽屉中明确触发刷新。
-  const viewShipmentTracking = (shipment: AnyRecord) => { setTrackingDrawerShipment(shipment); const cached = trackingMap[shipment.tracking_number]; setTrackingDrawer(cached || { carrier: shipment.carrier, tracking_number: shipment.tracking_number, overall_status: 'not_queried', consignment_events: [], articles: [] }); };
+  // 手动刷新单票时由后端保存成功快照；网络错误保留当前结果并显示可重试提示。
+  const refreshShipmentTracking = async (shipment: AnyRecord) => {
+    if (!shipment.tracking_number?.trim()) { setError(''); setNotice('Enter a tracking number before querying this shipment.'); return; }
+    const key = trackingKey(shipment.carrier, shipment.tracking_number);
+    setTrackingBusy(key);
+    try {
+      const result = await api(`/api/shipments/${shipment.id}/tracking`, { method: 'POST' });
+      setTrackingMap(previous => ({ ...previous, [trackingKey(result.carrier, result.tracking_number)]: result }));
+      return result;
+    } catch {
+      const previous = trackingMap[key];
+      const result = {
+        ...previous,
+        carrier: shipment.carrier,
+        tracking_number: shipment.tracking_number,
+        overall_status: previous?.overall_status && previous.overall_status !== 'not_queried' ? previous.overall_status : 'unavailable',
+        tracking_error: 'Could not reach the application API. Check the connection and retry.',
+        tracking_error_code: 'REQUEST_FAILED',
+        tracking_query_status: 'failed',
+        tracking_last_attempt_at: new Date().toISOString(),
+        tracking_stale: Boolean(previous?.tracking_last_successful_at),
+        consignment_events: previous?.consignment_events || [],
+        articles: previous?.articles || [],
+      };
+      setTrackingMap(current => ({ ...current, [key]: result }));
+      return result;
+    } finally { setTrackingBusy(null); }
+  };
+  // 抽屉直接展示本页面从服务端读取的最新持久化结果。
+  const viewShipmentTracking = (shipment: AnyRecord) => { setTrackingDrawerShipment(shipment); const cached = trackingMap[trackingKey(shipment.carrier, shipment.tracking_number || '')]; setTrackingDrawer(cached || { carrier: shipment.carrier, tracking_number: shipment.tracking_number || '', overall_status: 'not_queried', consignment_events: [], articles: [] }); };
   // 新 Shipment 默认使用一个启用承运商，不自动认领任何订单行。
   const addShipment = () => { const available = carriers.find(carrier => carrier.is_active); if (!available) { setError('No active carriers. Please maintain carriers first.'); return; } setForm((previous: AnyRecord) => { const n = previous.shipments.length + 1; return { ...previous, shipments: [...previous.shipments, { tracking_group: `Shipment ${n}`, carrier: available.name, carrier_id: available.id, tracking_number: '' }] }; }); };
   // 删除 Shipment 时同步清除订单行上的分组引用，防止草稿提交悬空关联。
@@ -234,12 +296,14 @@ export function OrderForm({ productsKey }: { productsKey: number }) {
         {!shipments.length ? <Typography color="text.secondary" p={3}>No shipments recorded.</Typography> : <Box className="shipments-grid">{shipments.map((shipment, index) => {
           const persisted = saved?.shipments?.find((s: AnyRecord) => s.tracking_group === shipment.tracking_group);
           const assignedLines = lines.filter(line => line.tracking_group === shipment.tracking_group);
-          const tracking = trackingMap[shipment.tracking_number];
+          const shipmentTrackingKey = trackingKey(shipment.carrier, shipment.tracking_number || '');
+          const tracking = trackingMap[shipmentTrackingKey];
           return <Paper className="shipment-card" key={shipment.tracking_group} variant="outlined">
             <Box className="shipment-card-heading">
               <Box className="shipment-card-title"><Typography variant="subtitle2" fontWeight={700}>Shipment #{persisted?.id ?? index + 1}</Typography><Typography variant="caption" color="text.secondary">{shipment.carrier}</Typography></Box>
               {persisted && <Box className="shipment-card-status">
-                <TrackingStatusChip status={tracking?.overall_status_raw || tracking?.overall_status || 'Not queried'} hasError={Boolean(tracking?.tracking_error)}/>
+                <TrackingStatusChip status={trackingLoading && !tracking ? 'Querying' : tracking?.overall_status_raw || tracking?.overall_status || 'Not queried'} hasError={Boolean(tracking?.tracking_error)}/>
+                {tracking?.tracking_last_successful_at && <Typography component="time" dateTime={tracking.tracking_last_successful_at} className="shipment-updated-at" variant="caption" color="text.secondary">Checked {formatDateTime(tracking.tracking_last_successful_at)}</Typography>}
                 {tracking?.last_updated && <Typography component="time" dateTime={tracking.last_updated} className="shipment-updated-at" variant="caption" color="text.secondary">Last updated {formatDateTime(tracking.last_updated)}</Typography>}
               </Box>}
               {editing ? <Button className="shipment-card-remove" color="error" size="small" onClick={() => removeShipment(index)}>Remove</Button> : persisted && <IconButton aria-label={`More actions for Shipment ${persisted.id}`} size="small" onClick={event => setShipmentMenu({ anchor: event.currentTarget, shipment: persisted })}><MoreVert fontSize="small"/></IconButton>}
@@ -271,7 +335,7 @@ export function OrderForm({ productsKey }: { productsKey: number }) {
     </Paper>
     <Menu anchorEl={shipmentMenu?.anchor || null} open={Boolean(shipmentMenu)} onClose={() => setShipmentMenu(null)}>
       <MenuItem onClick={() => { setShipmentMenu(null); setTab(1); setEditing(true); }} disabled={!canEdit}>Edit Shipment</MenuItem>
-      <MenuItem onClick={() => { const target = shipmentMenu?.shipment; setShipmentMenu(null); if (target) void refreshShipmentTracking(target); }} disabled={trackingBusy === shipmentMenu?.shipment.tracking_number}>Refresh Tracking</MenuItem>
+      <MenuItem onClick={() => { const target = shipmentMenu?.shipment; setShipmentMenu(null); if (target) void refreshShipmentTracking(target); }} disabled={Boolean(shipmentMenu?.shipment && trackingBusy === trackingKey(shipmentMenu.shipment.carrier, shipmentMenu.shipment.tracking_number || ''))}>Refresh Tracking</MenuItem>
       <MenuItem onClick={() => { const target = shipmentMenu?.shipment; setShipmentMenu(null); if (target) void deleteSavedShipment(target); }} disabled={saving || saved?.status !== 'draft'} sx={{ color: 'error.main' }}>Delete</MenuItem>
     </Menu>
     <Dialog open={productDialog} onClose={() => setProductDialog(false)} fullWidth maxWidth="sm">
@@ -304,7 +368,7 @@ export function OrderForm({ productsKey }: { productsKey: number }) {
           <Box className="shipment-drawer-fee"><Typography className="shipment-drawer-label">Shipping Fee</Typography><Typography variant="h6" className="shipment-drawer-fee-value">{trackingDrawerShipment.shipping_quote_status === 'quoted' ? money(trackingDrawerShipment.shipping_fee) : 'Not quoted'}</Typography></Box>
         </Box>
         <Box className="shipment-drawer-lines"><Typography className="shipment-drawer-label">Order Lines</Typography><Stack direction="row" flexWrap="wrap" gap={.6}>{(saved?.line_items || []).filter((line: AnyRecord) => line.tracking_group === trackingDrawerShipment.tracking_group).map((line: AnyRecord) => <Chip key={line.id || line.sku} size="small" variant="outlined" label={`${line.sku} × ${line.quantity}`}/>)}</Stack></Box>
-      </Paper>}{trackingDrawer && <TrackingResult data={trackingDrawer} drawerMode loading={trackingLoading && trackingDrawer.overall_status === 'not_queried'} refreshing={trackingBusy === trackingDrawerShipment?.tracking_number} onRefresh={async () => { if (trackingDrawerShipment) { const result = await refreshShipmentTracking(trackingDrawerShipment); if (result) setTrackingDrawer(result); } }}/>}</Box>
+      </Paper>}{trackingDrawer && <TrackingResult data={trackingDrawer} drawerMode loading={trackingLoading && trackingDrawer.overall_status === 'not_queried'} refreshing={trackingBusy === trackingKey(trackingDrawerShipment?.carrier || '', trackingDrawerShipment?.tracking_number || '')} onRefresh={async () => { if (trackingDrawerShipment) { const result = await refreshShipmentTracking(trackingDrawerShipment); if (result) setTrackingDrawer(result); } }}/>}</Box>
     </Drawer>
     <Snackbar open={Boolean(notice)} autoHideDuration={4500} anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }} onClose={() => setNotice('')}><Alert severity="warning" variant="filled" onClose={() => setNotice('')}>{notice}</Alert></Snackbar>
     {confirmDialog}

@@ -212,7 +212,9 @@ def _parse_tracking_result(payload: object, tracking_number: str) -> TrackingRes
             f"Australia Post returned an API error: {detail}"
             if detail
             else "Australia Post response did not contain tracking results.",
-            "NOT_FOUND" if detail and any(t in detail.casefold() for t in ("not found", "invalid tracking")) else "SERVICE_UNAVAILABLE",
+            "NOT_FOUND" if detail and any(t in detail.casefold() for t in ("not found", "invalid tracking"))
+            else "INVALID_RESPONSE" if not detail
+            else "SERVICE_UNAVAILABLE",
         )
 
     result = next(
@@ -328,7 +330,7 @@ def _get_tracking_result(
             result = _unavailable(
                 "A local request limit prevented a new tracking query; "
                 "Australia Post allows up to 10 requests per minute.",
-                "SERVICE_UNAVAILABLE",
+                "RATE_LIMITED",
             )
             log_api_event("tracking_query_completed", carrier=carrier, tracking_number=tracking_number, tracking_status=result.status, error_code=result.error_code, duration_ms=round((time.monotonic() - query_started) * 1000, 2))
             return result
@@ -364,8 +366,12 @@ def _get_tracking_result(
             result = _unavailable("Australia Post rejected the configured credentials or account.", "AUTH_FAILED")
         elif response.status_code == 404:
             result = _unavailable("Australia Post could not find the requested tracking resource.", "NOT_FOUND")
-        elif response.status_code == 429 or response.status_code >= 500:
+        elif response.status_code == 429:
+            result = _unavailable("Australia Post rate limit was reached. Try again shortly.", "RATE_LIMITED")
+        elif response.status_code >= 500:
             result = _unavailable(f"Australia Post testbed returned HTTP {response.status_code}.", "SERVICE_UNAVAILABLE")
+        elif 400 <= response.status_code < 500:
+            result = _unavailable(f"Australia Post rejected the tracking request (HTTP {response.status_code}).", "INVALID_REQUEST")
         else:
             response.raise_for_status()
             payload = response.json()
@@ -402,7 +408,7 @@ def _get_tracking_result(
         result = _unavailable(message, code)
     except ValueError:
         message = "Australia Post testbed returned invalid JSON."
-        result = _unavailable(message, "SERVICE_UNAVAILABLE")
+        result = _unavailable(message, "INVALID_RESPONSE")
     except httpx.RequestError as error:
         message = f"Australia Post testbed request failed: {_sanitize_message(type(error).__name__)}"
         result = _unavailable(message, "SERVICE_UNAVAILABLE")
@@ -417,8 +423,12 @@ def _get_tracking_result(
             duration_ms=round((time.monotonic() - request_started) * 1000, 2),
         )
 
+    # 失败结果不进入短期缓存；订单级持久化层单独控制自动重试间隔。
     with _cache_lock:
-        _cache[cache_key] = (time.monotonic(), result)
+        if result.error_code is None and result.status not in {"unavailable", "not_implemented"}:
+            _cache[cache_key] = (time.monotonic(), result)
+        else:
+            _cache.pop(cache_key, None)
     log_api_event(
         "tracking_query_completed",
         carrier=carrier,

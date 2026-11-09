@@ -8,7 +8,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 
-from sqlalchemy import (Boolean, Date, DateTime, ForeignKey, Integer, String, Table, Column,
+from sqlalchemy import (Boolean, Date, DateTime, ForeignKey, Integer, String, Text, Table, Column,
                         UniqueConstraint, create_engine, event, inspect, select, text)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
@@ -181,6 +181,29 @@ class ShipmentRow(Base):
     carrier_record: Mapped[CarrierRow | None] = relationship(back_populates="shipments")
     lines: Mapped[list[OrderLineRow]] = relationship(secondary=shipment_order_lines, back_populates="shipments")
     packages: Mapped[list["ShipmentPackageRow"]] = relationship(back_populates="shipment", cascade="all, delete-orphan")
+
+
+class ShipmentTrackingSnapshotRow(Base):
+    """保存每个 Shipment 最近一次成功追踪结果及最近一次查询状态。"""
+    __tablename__ = "shipment_tracking_snapshots"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    shipment_id: Mapped[int] = mapped_column(ForeignKey("shipments.id", ondelete="CASCADE"), unique=True, nullable=False, index=True)
+    carrier: Mapped[str] = mapped_column(String(80), nullable=False)
+    tracking_number: Mapped[str] = mapped_column(String(120), nullable=False)
+    overall_status: Mapped[str] = mapped_column(String(40), nullable=False)
+    overall_status_raw: Mapped[str | None] = mapped_column(String(160))
+    total_articles: Mapped[int | None] = mapped_column(Integer)
+    delivered_articles: Mapped[int | None] = mapped_column(Integer)
+    last_updated: Mapped[str | None] = mapped_column(String(80))
+    result_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    last_successful_query_at: Mapped[str | None] = mapped_column(String(40))
+    last_attempt_at: Mapped[str | None] = mapped_column(String(40))
+    last_attempt_status: Mapped[str | None] = mapped_column(String(30))
+    last_error_code: Mapped[str | None] = mapped_column(String(50))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    shipment: Mapped[ShipmentRow] = relationship()
 
 
 class ShipmentPackageRow(Base):

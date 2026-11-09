@@ -331,6 +331,10 @@ class ShipmentTrackingResponse(BaseModel):
     test_data_time_mismatch: bool = False
     tracking_error: str | None = None
     tracking_error_code: str | None = None
+    tracking_query_status: str = "not_queried"
+    tracking_last_attempt_at: str | None = None
+    tracking_last_successful_at: str | None = None
+    tracking_stale: bool = False
 
 
 class OrderLineResponse(BaseModel):

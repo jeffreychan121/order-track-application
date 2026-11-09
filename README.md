@@ -229,11 +229,15 @@ data/
 - 当前 Tracking 由后端代理 Australia Post testbed 请求，前端不保存承运商 API 密钥或密码。
 - 订单界面中的 Australia Post 和 StarTrack 都映射到 `integration_type = AUSTRALIA_POST`，由同一套 API 适配器处理。当前项目没有单独的 StarTrack API endpoint、凭据路由或适配器。
 - 追踪账号可通过 `AUSTRALIA_POST_TRACKING_ACCOUNT_NUMBER` 配置；未设置时回退到旧共享账号，再回退到报价账号。账号授权和 testbed 数据会影响实际结果。
-- 追踪结果会标准化为整票状态、Article 状态和事件时间线；短期缓存降低重复请求。`not_queried`、`not_found`、`unavailable` 和 `not_implemented` 会明确区分，不会伪造实时事件。
+- 打开订单详情时，前端会读取该订单已保存的追踪快照；首次查询或快照超过 15 分钟时，后端自动刷新。结果保存在 SQLite 的 `shipment_tracking_snapshots` 表中，包含整票状态、Article 状态、事件、最近一次成功查询时间和最近一次查询错误。
+- 页面内手动刷新会强制查询并更新数据库。短时失败后 60 秒内不自动重试，避免页面反复访问承运商；用户仍可手动重试。快照与 Shipment 的承运商和运单号绑定，修改运单后不会错误显示旧运单事件。
+- 追踪状态、承运商事件时间和最近一次成功查询时间分别展示。认证失败、找不到运单、限流、超时、网络/TLS 故障、无效响应和暂未实现会保留明确错误类型；刷新失败时保留最近一次成功数据并标为过期。没有历史成功结果时显示不可用状态。
+- 有效响应即使暂时没有事件，也会保存为 `unknown` 并显示“暂无物流事件”；缺少运单号不会发请求。无效/失败响应不覆盖最近一次成功状态或事件。
+- 订单详情使用的追踪快照持久化；独立 Tracking 工具页的临时运单查询不会写入某个订单的 Shipment。
 
 ### 异常行为
 
-认证被拒、超时、网络/TLS 错误、HTTP 错误、无效 JSON 或不符合预期的响应会转成可显示的错误状态和错误码。无法查询时，页面保留错误类别，用户可以重试；缺少运单号时不会发出追踪请求。上游没有返回事件时，页面显示空状态，不补造物流进度。
+认证被拒、找不到运单、限流、超时、网络/TLS 错误、其他 HTTP 错误、无效 JSON 或不符合预期的响应会转成可显示的错误状态和错误码。订单详情保留上次成功快照并提示最近刷新失败；没有成功快照时显示不可用和重试入口。无法查询时不会伪装成“暂无物流事件”，也不会清空先前成功的事件。上游成功但没有返回事件时，页面显示空状态，不补造物流进度。
 
 ### TNT
 
@@ -292,7 +296,7 @@ cp .env.example .env
 | Shipments | `POST /api/orders/{order_id}/shipments`、`PATCH/DELETE /api/shipments/{shipment_id}` |
 | Carriers | `GET/POST /api/carriers`、`GET/PATCH/DELETE /api/carriers/{carrier_id}` |
 | Shipping | `GET /api/shipping/accounts`、`GET /api/shipping/accounts/{profile_id}/products`、`POST /api/shipping/rates`、`POST /api/shipping/shipments/{shipment_id}/apply-rate`、`POST /api/shipping/orders/{order_no}/quotes/preview`、`POST /api/shipping/orders/{order_no}/shipments/save`、`POST /api/shipping/orders/{order_no}/quotes/apply` |
-| Tracking | `POST /api/orders/tracking`、`GET /api/orders/{order_id}/tracking?refresh=false` |
+| Tracking | `POST /api/orders/tracking`、`GET /api/orders/{order_id}/tracking?refresh=false`、`POST /api/shipments/{shipment_id}/tracking` |
 
 旧路径 `GET /api/shipping/account-products` 暂时保留兼容本地调用；新页面使用带账号档案 ID 的路径。字段约束以 `backend/app/models.py` 和 OpenAPI schema 为准。
 

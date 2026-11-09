@@ -1,9 +1,12 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, HTTPException, Query
 
 from .. import db_service
-from ..data_service import get_order_tracking
+from ..data_service import get_order_tracking, refresh_shipment_tracking as refresh_saved_shipment_tracking
 from ..logging_service import get_stack_frames, log_api_event
 from ..models import CreateOrderInput, OrderDetailResponse, ShipmentTrackingResponse
+from ..tracking_service import TrackingResult, get_tracking_result
 
 router = APIRouter(tags=["OMS"])
 
@@ -147,21 +150,63 @@ def query_tracking(payload: dict):
     tracking_number = str(payload.get("tracking_number", "")).strip()
     if not carrier or not tracking_number:
         raise HTTPException(status_code=422, detail="Carrier and tracking number are required")
-    result = __import__("app.tracking_service", fromlist=["get_tracking_result"]).get_tracking_result(carrier, tracking_number, refresh=True)
+    try:
+        result = get_tracking_result(carrier, tracking_number, refresh=True)
+        if not isinstance(result, TrackingResult):
+            raise TypeError("Tracking adapter returned an unsupported result type")
+    except Exception as error:
+        log_api_event(
+            "manual_tracking_query_unhandled_error",
+            level=40,
+            carrier=carrier,
+            tracking_number=tracking_number,
+            error_type=type(error).__name__,
+            stack_frames=get_stack_frames(error),
+        )
+        result = TrackingResult(
+            status="unavailable",
+            error="The tracking provider could not complete this request. Try again later.",
+            error_code="SERVICE_UNAVAILABLE",
+        )
     return _tracking_dto(result, carrier, tracking_number, "Manual query")
+
+
+@router.post("/api/shipments/{shipment_id}/tracking", response_model=ShipmentTrackingResponse)
+def refresh_shipment_tracking(shipment_id: int):
+    """显式刷新已保存 Shipment，并将成功结果或失败诊断写入 SQLite。"""
+    try:
+        result = refresh_saved_shipment_tracking(shipment_id)
+    except Exception as error:
+        log_api_event(
+            "shipment_tracking_refresh_failed",
+            level=40,
+            shipment_id=shipment_id,
+            error_type=type(error).__name__,
+            stack_frames=get_stack_frames(error),
+        )
+        raise HTTPException(status_code=500, detail="Shipment tracking refresh failed") from error
+    if result is None:
+        raise HTTPException(status_code=404, detail="Shipment not found")
+    return result
 
 
 def _tracking_dto(result, carrier: str, tracking_number: str, tracking_group: str):
     """将适配器结果转换为 OMS 对外的统一追踪响应结构。"""
+    queried_at = datetime.now(timezone.utc).isoformat()
     return ShipmentTrackingResponse(
         tracking_group=tracking_group, carrier=carrier, tracking_number=tracking_number,
         overall_status=result.status, overall_status_raw=result.raw_status,
-        total_articles=result.article_count if result.error_code is None else None,
-        delivered_articles=result.delivered_article_count if result.error_code is None else None,
+        total_articles=result.article_count if result.error_code is None and result.status != "not_implemented" else None,
+        delivered_articles=result.delivered_article_count if result.error_code is None and result.status != "not_implemented" else None,
         last_updated=result.last_updated, consignment_events=result.events,
         articles=[{"article_id": a.article_id, "product_type": a.product_type, "raw_status": a.raw_status,
                   "status": a.status, "last_updated": a.last_updated, "events": a.events} for a in result.articles],
-        tracking_error=result.error, tracking_error_code=result.error_code)
+        tracking_error=result.error, tracking_error_code=result.error_code,
+        tracking_query_status=("not_implemented" if result.status == "not_implemented"
+                               else "failed" if result.error_code or result.status == "unavailable" else "success"),
+        tracking_last_attempt_at=queried_at,
+        tracking_last_successful_at=(queried_at if not result.error_code and result.status not in {"unavailable", "not_implemented"} else None),
+        tracking_stale=False)
 
 
 @router.get("/api/orders/{order_id}/tracking", response_model=list[ShipmentTrackingResponse])
