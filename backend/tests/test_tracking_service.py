@@ -3,8 +3,10 @@ import base64
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
-from app import data_service, tracking_service
+from app import data_service, database, tracking_service
+from app.database import CarrierRow, OrderRow, ShipmentRow, ShipmentTrackingSnapshotRow
 from app.main import app
 from app.logging_service import LOG_FILE, _sanitize
 
@@ -29,6 +31,23 @@ def _success_response(request):
             ]},
         }]
     })
+
+
+@pytest.fixture
+def tracking_client(tmp_path):
+    """为路由追踪测试建立隔离数据库，并把目标测试 Shipment 指向受支持的适配器。"""
+    database.configure_database(f"sqlite:///{tmp_path / 'tracking-test.db'}")
+    with TestClient(app) as client:
+        with database.SessionLocal.begin() as session:
+            order = session.scalar(select(OrderRow).where(OrderRow.order_no == "PO-20251203-00046"))
+            carrier = session.scalar(select(CarrierRow).where(CarrierRow.code == "AUSTRALIA_POST"))
+            shipment = session.scalar(select(ShipmentRow).where(
+                ShipmentRow.order_id == order.id,
+                ShipmentRow.tracking_group == "Track 2",
+            ))
+            shipment.carrier = carrier.name
+            shipment.carrier_id = carrier.id
+        yield client
 
 
 def test_httpx_uses_basic_auth_account_header_tracking_id_and_parses_result(monkeypatch):
@@ -95,11 +114,16 @@ def test_unconfigured_credentials_and_tnt_do_not_make_requests(monkeypatch):
     assert tracking_service.get_tracking_result("TNT", "TNT-ID").status == "not_implemented"
 
 
-def test_fastapi_tracking_response_includes_classified_error(monkeypatch):
-    monkeypatch.setattr(data_service, "get_tracking_result", lambda *a, **kw: tracking_service.TrackingResult(
-        status="unavailable", error="certificate verification failed", error_code="TLS_ERROR"
-    ))
-    response = TestClient(app).get("/api/orders/PO-20251203-00046/tracking?refresh=true")
+def test_fastapi_tracking_response_includes_classified_error(monkeypatch, tracking_client):
+    def tracking_result(carrier, _number, integration_type):
+        if integration_type != "AUSTRALIA_POST":
+            return tracking_service.TrackingResult(status="not_implemented", error="No tracking integration is configured.", error_code="NOT_IMPLEMENTED")
+        return tracking_service.TrackingResult(
+            status="unavailable", error="certificate verification failed", error_code="TLS_ERROR"
+        )
+
+    monkeypatch.setattr(data_service, "_call_carrier", tracking_result)
+    response = tracking_client.get("/api/orders/PO-20251203-00046/tracking?refresh=true")
     assert response.status_code == 200
     result = next(item for item in response.json() if item["carrier"] != "TNT")
     assert result["overall_status"] == "unavailable"
@@ -108,7 +132,7 @@ def test_fastapi_tracking_response_includes_classified_error(monkeypatch):
     assert result["consignment_events"] == []
 
 
-def test_fastapi_dto_includes_articles_last_update_and_test_date_warning(monkeypatch):
+def test_fastapi_dto_includes_articles_last_update_and_test_date_warning(monkeypatch, tracking_client):
     old_event = {"date": "2025-02-13T11:49:59+11:00", "description": "Delivered", "location": "Sample Depot"}
     service_result = tracking_service.TrackingResult(
         status="delivered",
@@ -124,8 +148,12 @@ def test_fastapi_dto_includes_articles_last_update_and_test_date_warning(monkeyp
             events=[old_event],
         )],
     )
-    monkeypatch.setattr(data_service, "get_tracking_result", lambda *a, **kw: service_result)
-    response = TestClient(app).get("/api/orders/PO-20251203-00046/tracking?refresh=true")
+    monkeypatch.setattr(data_service, "_call_carrier", lambda _carrier, _number, integration_type: (
+        service_result if integration_type == "AUSTRALIA_POST" else tracking_service.TrackingResult(
+            status="not_implemented", error="No tracking integration is configured.", error_code="NOT_IMPLEMENTED"
+        )
+    ))
+    response = tracking_client.get("/api/orders/PO-20251203-00046/tracking?refresh=true")
     assert response.status_code == 200
     shipment = next(item for item in response.json() if item["carrier"] != "TNT")
     assert shipment["overall_status"] == "delivered"
@@ -136,6 +164,54 @@ def test_fastapi_dto_includes_articles_last_update_and_test_date_warning(monkeyp
     assert shipment["test_data_time_mismatch"] is True
     assert shipment["articles"][0]["article_id"] == "ARTICLE-ONE"
     assert shipment["consignment_events"][0]["date"].endswith("+11:00")
+
+
+def test_tracking_snapshot_survives_failed_refresh_and_auto_retry_uses_saved_result(monkeypatch, tracking_client):
+    event = {"date": "2026-11-08T09:00:00+11:00", "description": "Consignment accepted", "location": "Sydney NSW"}
+    good_result = tracking_service.TrackingResult(
+        status="in_transit", raw_status="In Transit", last_updated=event["date"], events=[event]
+    )
+    failed_result = tracking_service.TrackingResult(
+        status="unavailable", error="The tracking provider timed out.", error_code="TIMEOUT"
+    )
+    results = [good_result, failed_result]
+    upstream_calls = []
+
+    def tracking_result(_carrier, _number, integration_type):
+        if integration_type != "AUSTRALIA_POST":
+            return tracking_service.TrackingResult(status="not_implemented", error="No tracking integration is configured.", error_code="NOT_IMPLEMENTED")
+        upstream_calls.append(True)
+        return results.pop(0)
+
+    monkeypatch.setattr(data_service, "_call_carrier", tracking_result)
+    first = tracking_client.get("/api/orders/PO-20251203-00046/tracking?refresh=true").json()[0]
+    assert first["overall_status"] == "in_transit"
+    assert first["tracking_last_successful_at"]
+
+    second = tracking_client.get("/api/orders/PO-20251203-00046/tracking?refresh=true").json()[0]
+    assert second["overall_status"] == "in_transit"
+    assert second["tracking_stale"] is True
+    assert second["tracking_error_code"] == "TIMEOUT"
+    assert second["tracking_last_successful_at"] == first["tracking_last_successful_at"]
+    assert second["consignment_events"] == [event]
+
+    # 冷却期内的页面进入只读 SQLite 快照，不重复访问承运商。
+    cached = tracking_client.get("/api/orders/PO-20251203-00046/tracking?refresh=false").json()[0]
+    assert cached["overall_status"] == "in_transit"
+    assert cached["tracking_error_code"] == "TIMEOUT"
+    assert len(upstream_calls) == 2
+
+    with database.SessionLocal() as session:
+        order = session.scalar(select(OrderRow).where(OrderRow.order_no == "PO-20251203-00046"))
+        shipment = session.scalar(select(ShipmentRow).where(
+            ShipmentRow.order_id == order.id, ShipmentRow.tracking_group == "Track 2"
+        ))
+        snapshot = session.scalar(select(ShipmentTrackingSnapshotRow).where(
+            ShipmentTrackingSnapshotRow.shipment_id == shipment.id
+        ))
+        assert snapshot.last_attempt_status == "failed"
+        assert snapshot.overall_status == "in_transit"
+        assert "Consignment accepted" in snapshot.result_json
 
 
 def _parse(payload):
