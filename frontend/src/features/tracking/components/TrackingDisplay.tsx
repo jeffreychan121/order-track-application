@@ -54,6 +54,9 @@ export function TrackingResult({ data, onRefresh, drawerMode = false, loading = 
       {data.tracking_error_code}: {data.tracking_error}
       {data.tracking_last_attempt_at && <> Last attempted {formatDateTime(data.tracking_last_attempt_at)}.</>}
     </Alert>}
+    {data.test_data_time_mismatch && <Alert severity="warning" sx={{ mt: 1.5 }}>
+      Carrier events predate this order. Confirm that this tracking number belongs to this order before treating the events as its shipment history.
+    </Alert>}
     <Box className="tracking-summary-grid"><Box className="tracking-stat"><Typography variant="caption">Articles</Typography><strong>{data.total_articles ?? '—'}</strong></Box><Box className="tracking-stat"><Typography variant="caption">Delivered</Typography><strong>{data.delivered_articles ?? '—'}</strong></Box><Box className="tracking-stat tracking-stat-updated"><Typography variant="caption">Latest Carrier Event</Typography><strong>{data.last_updated ? (drawerMode ? formatDateTime(data.last_updated) : data.last_updated) : '—'}</strong></Box><Box className="tracking-stat tracking-stat-updated"><Typography variant="caption">Last Successful Check</Typography><strong>{data.tracking_last_successful_at ? formatDateTime(data.tracking_last_successful_at) : 'Not available'}</strong></Box></Box>
     <Paper className="tracking-event-section" variant="outlined"><Typography variant="subtitle2" fontWeight={700}>Consignment Events</Typography><Events events={data.consignment_events || []} formatDates={drawerMode} emptyText={emptyText}/></Paper>
     {drawerMode && (data.articles || []).length > 0 && <Typography className="tracking-articles-title" variant="subtitle1">Article Tracking · {data.articles.length}</Typography>}

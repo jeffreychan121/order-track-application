@@ -306,6 +306,23 @@ def seed_carriers() -> None:
                     is_active=active, rate_capability=rates, tracking_capability=tracking))
         session.flush()
         by_name = {carrier.name: carrier for carrier in session.scalars(select(CarrierRow)).all()}
+        australia_post = by_name.get("Australia Post")
+        if australia_post is not None:
+            # 这些历史测试运单已由 Australia Post API 单独查询成功；
+            # 只更正已核验的记录，不推断其他混合承运商标签，也不改订单、运费或运单号。
+            verified_historical_shipments = (
+                ("PO-20251130-00072", "2FWZ50008569"),
+                ("PO-20251203-00046", "2FWZ50008645"),
+            )
+            for order_no, tracking_number in verified_historical_shipments:
+                shipment = session.scalar(select(ShipmentRow).join(OrderRow).where(
+                    OrderRow.order_no == order_no,
+                    ShipmentRow.tracking_number == tracking_number,
+                    ShipmentRow.carrier == "StarTrack / Australia Post",
+                ))
+                if shipment is not None:
+                    shipment.carrier = australia_post.name
+                    shipment.carrier_id = australia_post.id
         for shipment in session.scalars(select(ShipmentRow).where(ShipmentRow.carrier_id.is_(None))).all():
             # 只精确匹配已知名称；历史混合名称含义不明确，因此不自动猜测其集成类型。
             if shipment.carrier in by_name:

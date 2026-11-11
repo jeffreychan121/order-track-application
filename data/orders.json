@@ -48,7 +48,7 @@
       "shipments": [
         {
           "tracking_group": "Track 1",
-          "carrier": "StarTrack / Australia Post",
+          "carrier": "Australia Post",
           "tracking_number": "2FWZ50008569",
           "shipping_fee": "10.99",
           "shipping_quote": {
@@ -108,7 +108,7 @@
       "shipments": [
         {
           "tracking_group": "Track 2",
-          "carrier": "StarTrack / Australia Post",
+          "carrier": "Australia Post",
           "tracking_number": "2FWZ50008645",
           "shipping_fee": "0.00",
           "shipping_quote": null
